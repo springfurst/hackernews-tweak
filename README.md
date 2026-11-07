@@ -64,11 +64,22 @@ whether you got there by jumping or by scrolling. A stack of jumps alone goes
 stale as soon as you scroll: after reading on for a screen or two, the jump
 you would undo is no longer related to where you are, so back teleports.
 
-So scrolling also leaves stops. Once scrolling settles for 600ms, a manual
-scroll that moved more than 1.5 viewports and landed on a different comment
-becomes a stop of its own. Back then returns to where that scroll *started*
-rather than jumping past everything you just read. A new stop truncates the
-forward branch, as a browser does. The trail is capped at 60 entries.
+So scrolling also leaves stops. Once scrolling settles, a manual scroll that
+moved far enough and landed on a different comment becomes a stop of its own.
+Back then returns to where that scroll *started* rather than jumping past
+everything you just read. A new stop truncates the forward branch, as a browser
+does. The trail is capped at 60 entries.
+
+Before any back/forward (or jump), the current position is written into the
+current waypoint, so the opposite button returns to exactly where you were —
+including a partial scroll that never became a stop. Two dead zones keep this
+from turning into noise, both adjustable under **Navigation** in the panel:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| Settle time | 600 ms | how long scrolling must be still before it can become a stop |
+| Scroll dead zone | 1.50 screens | how far a manual scroll must move to become its own stop |
+| Position dead zone | 0.10 screens | how far you must drift before it rewrites the current waypoint |
 
 There is no time-based expiry: reading a long comment can take minutes, so
 elapsed time says nothing about whether a stop is still relevant. Distance
@@ -125,6 +136,7 @@ hnTweak.apply({ fontSize: 17 });
 hnTweak.apply({ indentStep: 8, indentCap: 6 });  // badge appears past depth 6
 hnTweak.apply({ navBar: false });
 hnTweak.apply({ rememberPosition: false });
+hnTweak.apply({ settleMs: 900, scrollDeadZone: 2.5, positionDeadZone: 0.2 });
 ```
 
 `indentCap` is what the depth badge keys off: at or below the cap the rails

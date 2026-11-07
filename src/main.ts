@@ -25,6 +25,12 @@ interface HnSettings {
   navBar: boolean;
   /** Resume where you left off on a thread. */
   rememberPosition: boolean;
+  /** How long scrolling must be still before a manual scroll becomes a stop. */
+  settleMs: number;
+  /** How far a manual scroll must move to become its own stop, in viewports. */
+  scrollDeadZone: number;
+  /** How far the position must drift before it updates the current waypoint, in viewports. */
+  positionDeadZone: number;
 }
 
 const HN_MAX_INDENT = 21;
@@ -42,6 +48,9 @@ const HN_DEFAULTS: HnSettings = {
   indentCap: 8,
   navBar: true,
   rememberPosition: true,
+  settleMs: 600,
+  scrollDeadZone: 1.5,
+  positionDeadZone: 0.1,
 };
 
 // Greasemonkey API. Declared loosely because we run under Tampermonkey,
@@ -286,8 +295,6 @@ interface HnTrailEntry {
  * Any new stop truncates the forward branch, as a browser does.
  */
 const HN_TRAIL_MAX = 60;
-/** A manual scroll only becomes its own stop after moving this many viewports. */
-const HN_CHECKPOINT_VIEWPORTS = 1.5;
 
 let hnTrail: HnTrailEntry[] = [];
 let hnTrailPos = -1;
@@ -323,14 +330,21 @@ function hnTrailPush(entry: HnTrailEntry): void {
   }
 }
 
-/** Keep the trail head pointing at where we actually are, just before leaving. */
-function hnTrailBeforeJump(): void {
+/**
+ * Keep the trail head pointing at where we actually are, before we leave it.
+ * Called before every jump and before back/forward, so the reverse direction
+ * always returns to the exact spot rather than to the stale waypoint.
+ *
+ * The margin keeps sub-threshold jitter from rewriting the waypoint.
+ */
+function hnTrailSyncHead(): void {
   hnTrailInit();
   const now = hnCurrentEntry();
   const cur = hnTrail[hnTrailPos];
-  if (now && cur && (cur.row !== now.row || Math.abs(cur.dy - now.dy) > 4)) {
-    hnTrail[hnTrailPos] = now;
-  }
+  if (!now || !cur) return;
+  const drift = Math.abs(hnEntryY(now) - hnEntryY(cur));
+  if (drift < window.innerHeight * hnSettings.positionDeadZone) return;
+  hnTrail[hnTrailPos] = now;
 }
 
 /** Called when scrolling settles; turns a long manual scroll into a stop. */
@@ -343,7 +357,7 @@ function hnTrailCheckpoint(): void {
     cur.dy = now.dy; // still the same comment, just nudge the offset
     return;
   }
-  if (Math.abs(hnEntryY(now) - hnEntryY(cur)) < window.innerHeight * HN_CHECKPOINT_VIEWPORTS) {
+  if (Math.abs(hnEntryY(now) - hnEntryY(cur)) < window.innerHeight * hnSettings.scrollDeadZone) {
     return;
   }
   hnTrailPush(now);
@@ -351,6 +365,9 @@ function hnTrailCheckpoint(): void {
 
 function hnTrailGo(delta: number): void {
   hnTrailInit();
+  // Record where we are before moving, so the opposite button can bring us back
+  // to exactly here - including a partial scroll that never became a stop.
+  hnTrailSyncHead();
   const next = hnTrailPos + delta;
   if (next < 0 || next >= hnTrail.length) return;
   const rows = hnRows();
@@ -368,7 +385,7 @@ function hnTrailGo(delta: number): void {
 function hnGoto(row: HTMLElement | undefined, record = true): void {
   if (!row) return;
   if (record) {
-    hnTrailBeforeJump();
+    hnTrailSyncHead();
     hnTrailPush({ row, dy: HN_NAV_OFFSET });
   }
   hnOverrideRow = row;
@@ -535,15 +552,20 @@ function hnSyncSheet(): void {
     b.setAttribute("aria-checked", String(b.dataset.theme === hnSettings.theme));
   }
 
-  const bind = (id: string, value: number, suffix: string): void => {
+  const bind = (id: string, value: number, format: (v: number) => string): void => {
     const input = sheet.querySelector<HTMLInputElement>(`#${id}`);
     const out = sheet.querySelector<HTMLElement>(`#${id}-out`);
     if (input) input.value = String(value);
-    if (out) out.textContent = `${value}${suffix}`;
+    if (out) out.textContent = format(value);
   };
-  bind("hn-fs", hnSettings.fontSize, "px");
-  bind("hn-step", hnSettings.indentStep, "px");
-  bind("hn-cap", hnSettings.indentCap, "");
+  const px = (v: number): string => `${v}px`;
+  const screens = (v: number): string => `${v.toFixed(2)} screens`;
+  bind("hn-fs", hnSettings.fontSize, px);
+  bind("hn-step", hnSettings.indentStep, px);
+  bind("hn-cap", hnSettings.indentCap, String);
+  bind("hn-settle", hnSettings.settleMs, (v) => `${v} ms`);
+  bind("hn-scroll-dz", hnSettings.scrollDeadZone, screens);
+  bind("hn-pos-dz", hnSettings.positionDeadZone, screens);
 
   const remember = sheet.querySelector<HTMLInputElement>("#hn-remember");
   if (remember) remember.checked = hnSettings.rememberPosition;
@@ -587,6 +609,20 @@ function hnBuildSheet(): void {
       </div>
       <label class="hn-check"><input id="hn-remember" type="checkbox"> Remember reading position</label>
 
+      <h3>Navigation</h3>
+      <div class="hn-field">
+        <label for="hn-settle">Settle time <output id="hn-settle-out"></output></label>
+        <input id="hn-settle" type="range" min="200" max="1500" step="100">
+      </div>
+      <div class="hn-field">
+        <label for="hn-scroll-dz">Scroll dead zone <output id="hn-scroll-dz-out"></output></label>
+        <input id="hn-scroll-dz" type="range" min="0.5" max="3" step="0.25">
+      </div>
+      <div class="hn-field">
+        <label for="hn-pos-dz">Position dead zone <output id="hn-pos-dz-out"></output></label>
+        <input id="hn-pos-dz" type="range" min="0.02" max="0.5" step="0.02">
+      </div>
+
       <h3>Chrome</h3>
       <label class="hn-check"><input id="hn-navbar" type="checkbox"> Navigation bar</label>
 
@@ -619,18 +655,31 @@ function hnBuildSheet(): void {
     });
   }
 
-  const wireRange = (id: string, key: "fontSize" | "indentStep" | "indentCap", suffix: string): void => {
+  type RangeKey =
+    | "fontSize"
+    | "indentStep"
+    | "indentCap"
+    | "settleMs"
+    | "scrollDeadZone"
+    | "positionDeadZone";
+
+  const wireRange = (id: string, key: RangeKey, format: (v: number) => string): void => {
     const input = wrap.querySelector<HTMLInputElement>(`#${id}`);
     const out = wrap.querySelector<HTMLElement>(`#${id}-out`);
     input?.addEventListener("input", () => {
       const value = Number(input.value);
-      if (out) out.textContent = `${value}${suffix}`;
+      if (out) out.textContent = format(value);
       hnUpdate({ [key]: value } as Partial<HnSettings>);
     });
   };
-  wireRange("hn-fs", "fontSize", "px");
-  wireRange("hn-step", "indentStep", "px");
-  wireRange("hn-cap", "indentCap", "");
+  const px = (v: number): string => `${v}px`;
+  const screens = (v: number): string => `${v.toFixed(2)} screens`;
+  wireRange("hn-fs", "fontSize", px);
+  wireRange("hn-step", "indentStep", px);
+  wireRange("hn-cap", "indentCap", String);
+  wireRange("hn-settle", "settleMs", (v) => `${v} ms`);
+  wireRange("hn-scroll-dz", "scrollDeadZone", screens);
+  wireRange("hn-pos-dz", "positionDeadZone", screens);
 
   wrap.querySelector<HTMLInputElement>("#hn-remember")?.addEventListener("change", (e) => {
     hnUpdate({ rememberPosition: (e.target as HTMLInputElement).checked });
@@ -752,7 +801,7 @@ function hnOnScroll(): void {
   }
   // Once scrolling settles, a long manual scroll becomes a stop of its own.
   clearTimeout(hnCheckpointTimer);
-  hnCheckpointTimer = window.setTimeout(hnTrailCheckpoint, 600);
+  hnCheckpointTimer = window.setTimeout(hnTrailCheckpoint, hnSettings.settleMs);
   if (hnScrollRaf) return;
   hnScrollRaf = requestAnimationFrame(() => {
     hnScrollRaf = 0;
@@ -794,6 +843,21 @@ function hnStart(): void {
     },
     apply: hnUpdate,
     openSettings: hnOpenSheet,
+    /** Read-only view of the back/forward trail, for debugging. */
+    get trail() {
+      const rows = hnRows();
+      return {
+        pos: hnTrailPos,
+        entries: hnTrail.map((e, i) => ({
+          i,
+          id: e.row.id,
+          dy: e.dy,
+          row: rows.indexOf(e.row),
+          y: Math.round(hnEntryY(e)),
+          here: i === hnTrailPos,
+        })),
+      };
+    },
   };
 }
 
