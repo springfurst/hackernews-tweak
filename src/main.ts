@@ -128,16 +128,6 @@ function hnFirstChildIndex(rows: HTMLElement[], i: number): number {
   return -1;
 }
 
-function hnNextSiblingIndex(rows: HTMLElement[], i: number): number {
-  const d = hnDepth(rows[i]);
-  for (let j = i + 1; j < rows.length; j++) {
-    const dj = hnDepth(rows[j]);
-    if (dj < d) return -1;
-    if (dj === d) return j;
-  }
-  return -1;
-}
-
 function hnPrevSiblingIndex(rows: HTMLElement[], i: number): number {
   const d = hnDepth(rows[i]);
   for (let j = i - 1; j >= 0; j--) {
@@ -167,6 +157,16 @@ function hnAfterSubtreeIndex(rows: HTMLElement[], i: number): number {
  * enough to run every animation frame.
  */
 function hnCurrentIndex(rows: HTMLElement[]): number {
+  // After an explicit jump, stay anchored to the comment we landed on. Deriving
+  // it from scroll position immediately would pick whatever sits 35% down the
+  // screen, which is usually a *later* comment — so pressing prev twice would
+  // move forward, or nowhere at all.
+  if (hnOverrideRow) {
+    const idx = rows.indexOf(hnOverrideRow);
+    if (idx >= 0) return idx;
+    hnOverrideRow = null;
+  }
+
   const anchor = window.innerHeight * 0.35;
   let lo = 0;
   let hi = rows.length - 1;
@@ -202,6 +202,10 @@ function hnUpdateDepths(): void {
 /* ------------------------------------------------------------------ */
 
 let hnScrollFrame = 0;
+/** The row an explicit jump landed on; cleared once the reader scrolls by hand. */
+let hnOverrideRow: HTMLElement | null = null;
+/** Last scroll offset we set ourselves, so we can tell programmatic from manual. */
+let hnProgrammaticY = -1;
 
 /**
  * Animate the scroll ourselves instead of using `behavior: "smooth"`.
@@ -214,6 +218,7 @@ function hnScrollTo(targetY: number): void {
   const delta = targetY - startY;
   if (Math.abs(delta) < 2 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     window.scrollTo(0, targetY);
+    hnProgrammaticY = window.scrollY;
     return;
   }
 
@@ -224,9 +229,11 @@ function hnScrollTo(targetY: number): void {
   const step = (now: number): void => {
     const p = Math.min(1, (now - started) / duration);
     const eased = 1 - Math.pow(1 - p, 3);
-    window.scrollTo(0, startY + delta * eased);
+    window.scrollTo(0, p >= 1 ? targetY : startY + delta * eased);
+    // Record the real offset: near the end of the document the browser clamps,
+    // and a stale target would look like a manual scroll.
+    hnProgrammaticY = window.scrollY;
     hnScrollFrame = p < 1 ? requestAnimationFrame(step) : 0;
-    if (p >= 1) window.scrollTo(0, targetY);
   };
   hnScrollFrame = requestAnimationFrame(step);
 }
@@ -256,6 +263,7 @@ let hnFlashTimer = 0;
 
 function hnGoto(row: HTMLElement | undefined): void {
   if (!row) return;
+  hnOverrideRow = row;
   hnScrollTo(row.getBoundingClientRect().top + window.scrollY - HN_NAV_OFFSET);
 
   row.classList.remove("hn-flash");
@@ -346,11 +354,18 @@ function hnBuildNav(): HnNav | null {
   add("fold", "fold", (rows, i) => hnFoldAndAdvance(rows, i));
   add("parent", "parent", (rows, i) => go(rows, hnParentIndex(rows, i)));
   add("child", "child", (rows, i) => go(rows, hnFirstChildIndex(rows, i)));
-  add("prev", "prev", (rows, i) => go(rows, hnPrevSiblingIndex(rows, i)));
+  add("prev", "prev", (rows, i) => {
+    // Step back: previous sibling, or up to the parent when this is a first
+    // child. "Previous sibling only" was unavailable for over half of all
+    // comments, which read as the button being broken.
+    const sib = hnPrevSiblingIndex(rows, i);
+    go(rows, sib >= 0 ? sib : hnParentIndex(rows, i));
+  });
   add("next", "next", (rows, i) => {
-    // Fall back to the ancestor's next sibling so "next" always advances.
-    const sib = hnNextSiblingIndex(rows, i);
-    go(rows, sib >= 0 ? sib : i + 1);
+    // First row at or above this depth: the next sibling, or the parent's next
+    // sibling when this was the last child. Skips the subtree, like HN's own
+    // "next".
+    go(rows, hnAfterSubtreeIndex(rows, i));
   });
 
   let refRow: HTMLElement | null = null;
@@ -369,9 +384,9 @@ function hnBuildNav(): HnNav | null {
     const state: Record<string, boolean> = {
       parent: hnParentIndex(rows, i) >= 0,
       child: hnFirstChildIndex(rows, i) >= 0,
-      prev: hnPrevSiblingIndex(rows, i) >= 0,
-      next: i + 1 < rows.length,
-      fold: i + 1 < rows.length,
+      prev: hnPrevSiblingIndex(rows, i) >= 0 || hnParentIndex(rows, i) >= 0,
+      next: hnAfterSubtreeIndex(rows, i) >= 0,
+      fold: hnAfterSubtreeIndex(rows, i) >= 0,
     };
     for (const [kind, b] of buttons) b.disabled = !state[kind];
   };
@@ -612,6 +627,10 @@ function hnApplySettings(s: HnSettings): void {
 let hnScrollRaf = 0;
 
 function hnOnScroll(): void {
+  // A real scroll (not ours) releases the jump anchor.
+  if (hnOverrideRow && hnScrollFrame === 0 && Math.abs(window.scrollY - hnProgrammaticY) > 4) {
+    hnOverrideRow = null;
+  }
   if (hnScrollRaf) return;
   hnScrollRaf = requestAnimationFrame(() => {
     hnScrollRaf = 0;

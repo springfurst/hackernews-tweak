@@ -54,8 +54,8 @@ rarely-used action is leftmost, the ones you reach for are rightmost:
 | `fold` | collapse the subtree, then jump past it |
 | `parent` | one level up |
 | `child` | first reply |
-| `prev` | previous sibling |
-| `next` | next sibling, falling back to the ancestor's next sibling so it always advances |
+| `prev` | previous sibling, or up to the parent when this is a first child |
+| `next` | next sibling, or the parent's next sibling when this is the last child |
 
 A gear sits to the left of the bar as its own chip rather than a seventh
 button, and opens the control panel. It stays put when the bar itself is
@@ -69,6 +69,11 @@ carries the nesting rails).
 
 Navigation is computed from the `indent` attribute — the same source of truth
 `hn.js` uses — so it needs no extra DOM and survives HN's own collapsing.
+
+After a jump the bar stays anchored to the comment you landed on, and only
+falls back to the scroll position once you scroll by hand — otherwise the
+"current" comment would immediately become whatever sits 35% down the screen,
+which is usually a later one, and pressing `prev` twice would move forward.
 
 Scrolling is animated in script rather than via `behavior: "smooth"`, because
 native smooth scrolling is distance-dependent and is dropped for long jumps
