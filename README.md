@@ -58,7 +58,8 @@ at the top of the reading area:
 | `fold` | collapse the subtree, then jump past it |
 
 Buttons disable themselves when there is nowhere to go, and the comment the bar
-is navigating from is marked with an accent bar on its left edge.
+is navigating from is marked with an accent bar on its right edge (the left gutter already
+carries the nesting rails).
 
 Navigation is computed from the `indent` attribute — the same source of truth
 `hn.js` uses — so it needs no extra DOM and survives HN's own collapsing.

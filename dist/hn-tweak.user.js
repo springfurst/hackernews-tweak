@@ -175,8 +175,10 @@ html:not(.hn-nav-on) #hn-nav{display:none!important}
 @keyframes hn-flash{from{background-color:var(--hn-flash)}to{background-color:transparent}}
 tr.hn-flash .commtext{animation:hn-flash 1.3s ease-out;border-radius:3px}
 
-/* Persistent marker for the comment the nav bar is navigating from. */
-tr.hn-ref .commtext{box-shadow:inset 3px 0 0 var(--hn-accent);padding-left:9px;margin-left:-9px;border-radius:2px}
+/* Persistent marker for the comment the nav bar is navigating from. Right
+   edge, not left: the left gutter already carries the nesting rails. No
+   padding or margin, so the marker never re-wraps text as it moves. */
+tr.hn-ref td.default{box-shadow:inset -3px 0 0 var(--hn-accent)}
 
 /* enlarge the [–] collapse target without shifting layout */
 .comhead .togg{padding:6px 12px 6px 2px;margin:-6px -12px -6px -2px}
