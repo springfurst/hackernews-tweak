@@ -497,44 +497,104 @@ function hnFlash(row) {
     clearTimeout(hnFlashTimer);
     hnFlashTimer = window.setTimeout(() => row.classList.remove("hn-flash"), 1400);
 }
-const HN_HISTORY_MAX = 50;
-const hnHistory = [];
-function hnPushHistory(target) {
+/**
+ * Back/forward walk a single trail of "stops" — places you came to rest,
+ * whether you got there by jumping or by scrolling. A stack of jumps alone
+ * goes stale as soon as you scroll: after reading on for a screen or two, the
+ * jump you would undo is no longer related to where you are.
+ *
+ * Because scrolling also leaves stops, back always moves to somewhere you were
+ * actually reading, and never teleports past a stretch you scrolled through.
+ * Any new stop truncates the forward branch, as a browser does.
+ */
+const HN_TRAIL_MAX = 60;
+/** A manual scroll only becomes its own stop after moving this many viewports. */
+const HN_CHECKPOINT_VIEWPORTS = 1.5;
+let hnTrail = [];
+let hnTrailPos = -1;
+/** The scroll offset an entry would put us at. Stable across reflows. */
+function hnEntryY(e) {
+    return e.row.getBoundingClientRect().top + window.scrollY - e.dy;
+}
+function hnCurrentEntry() {
     const rows = hnRows();
-    const from = rows[hnCurrentIndex(rows)];
-    if (!from || from === target)
+    if (rows.length === 0)
+        return null;
+    const row = rows[hnCurrentIndex(rows)];
+    return row ? { row, dy: Math.round(row.getBoundingClientRect().top) } : null;
+}
+function hnTrailInit() {
+    if (hnTrailPos >= 0 && hnTrail.length > 0)
         return;
-    hnHistory.push({ row: from, dy: Math.round(from.getBoundingClientRect().top) });
-    if (hnHistory.length > HN_HISTORY_MAX)
-        hnHistory.shift();
+    const now = hnCurrentEntry();
+    if (!now)
+        return;
+    hnTrail = [now];
+    hnTrailPos = 0;
+}
+function hnTrailPush(entry) {
+    hnTrail.length = hnTrailPos + 1; // drop the forward branch
+    hnTrail.push(entry);
+    hnTrailPos = hnTrail.length - 1;
+    if (hnTrail.length > HN_TRAIL_MAX) {
+        const drop = hnTrail.length - HN_TRAIL_MAX;
+        hnTrail.splice(0, drop);
+        hnTrailPos -= drop;
+    }
+}
+/** Keep the trail head pointing at where we actually are, just before leaving. */
+function hnTrailBeforeJump() {
+    hnTrailInit();
+    const now = hnCurrentEntry();
+    const cur = hnTrail[hnTrailPos];
+    if (now && cur && (cur.row !== now.row || Math.abs(cur.dy - now.dy) > 4)) {
+        hnTrail[hnTrailPos] = now;
+    }
+}
+/** Called when scrolling settles; turns a long manual scroll into a stop. */
+function hnTrailCheckpoint() {
+    hnTrailInit();
+    const now = hnCurrentEntry();
+    const cur = hnTrail[hnTrailPos];
+    if (!now || !cur)
+        return;
+    if (cur.row === now.row) {
+        cur.dy = now.dy; // still the same comment, just nudge the offset
+        return;
+    }
+    if (Math.abs(hnEntryY(now) - hnEntryY(cur)) < window.innerHeight * HN_CHECKPOINT_VIEWPORTS) {
+        return;
+    }
+    hnTrailPush(now);
+}
+function hnTrailGo(delta) {
+    hnTrailInit();
+    const next = hnTrailPos + delta;
+    if (next < 0 || next >= hnTrail.length)
+        return;
+    const rows = hnRows();
+    const entry = hnTrail[next];
+    const idx = rows.indexOf(entry.row);
+    if (idx < 0)
+        return;
+    hnTrailPos = next;
+    hnEnsureVisible(rows, idx);
+    hnOverrideRow = entry.row;
+    hnScrollTo(entry.row.getBoundingClientRect().top + window.scrollY - entry.dy);
+    hnFlash(entry.row);
+    hnNav?.refresh();
 }
 function hnGoto(row, record = true) {
     if (!row)
         return;
-    if (record)
-        hnPushHistory(row);
+    if (record) {
+        hnTrailBeforeJump();
+        hnTrailPush({ row, dy: HN_NAV_OFFSET });
+    }
     hnOverrideRow = row;
     hnScrollTo(row.getBoundingClientRect().top + window.scrollY - HN_NAV_OFFSET);
     hnFlash(row);
     hnNav?.refresh();
-}
-/** Return to where we were before the last jump, exact offset included. */
-function hnGoBack() {
-    const rows = hnRows();
-    while (hnHistory.length > 0) {
-        const entry = hnHistory.pop();
-        if (!entry || !entry.row.isConnected)
-            continue;
-        const idx = rows.indexOf(entry.row);
-        if (idx < 0)
-            continue;
-        hnEnsureVisible(rows, idx);
-        hnOverrideRow = entry.row;
-        hnScrollTo(entry.row.getBoundingClientRect().top + window.scrollY - entry.dy);
-        hnFlash(entry.row);
-        hnNav?.refresh();
-        return;
-    }
 }
 /**
  * Collapse the subtree (if any) and jump past it. We click HN's own toggle so
@@ -555,11 +615,11 @@ function hnFoldAndAdvance(rows, i) {
 /* ------------------------------------------------------------------ */
 const HN_ICONS = {
     back: '<path d="M6 4L3 7l3 3"/><path d="M3 7h6.5a4 4 0 0 1 0 8H8"/>',
+    forward: '<path d="M10 4l3 3-3 3"/><path d="M13 7H6.5a4 4 0 0 0 0 8H8"/>',
     parent: '<path d="M8 13V4M4 8l4-4 4 4"/>',
     child: '<path d="M8 3v9M4 8l4 4 4-4"/>',
     prev: '<path d="M10 3L5 8l5 5"/>',
     next: '<path d="M6 3l5 5-5 5"/>',
-    fold: '<path d="M3 2h10M4 6l4 4 4-4"/>',
     settings: '<path d="M3 5h10M3 11h10"/><circle cx="6" cy="5" r="1.7"/><circle cx="10" cy="11" r="1.7"/>',
 };
 function hnBuildNav() {
@@ -598,10 +658,10 @@ function hnBuildNav() {
         buttons.set(kind, b);
         bar.appendChild(b);
     };
-    // Left to right: back/undo and fold first, the ones a right thumb reaches
-    // for (next/prev, parent/child) last.
-    add("back", "back", () => hnGoBack());
-    add("fold", "fold", (rows, i) => hnFoldAndAdvance(rows, i));
+    // Left to right: history and less-used actions first, the ones a right thumb
+    // reaches for (next/prev, parent/child) last.
+    add("back", "back", () => hnTrailGo(-1));
+    add("forward", "forward", () => hnTrailGo(1));
     add("parent", "parent", (rows, i) => go(rows, hnParentIndex(rows, i)));
     add("child", "child", (rows, i) => go(rows, hnFirstChildIndex(rows, i)));
     add("prev", "prev", (rows, i) => {
@@ -622,6 +682,7 @@ function hnBuildNav() {
         const rows = hnRows();
         if (rows.length === 0)
             return;
+        hnTrailInit();
         const i = hnCurrentIndex(rows);
         if (rows[i] !== refRow) {
             refRow?.classList.remove("hn-ref");
@@ -629,12 +690,12 @@ function hnBuildNav() {
             refRow = rows[i];
         }
         const state = {
-            back: hnHistory.length > 0,
+            back: hnTrailPos > 0,
+            forward: hnTrailPos >= 0 && hnTrailPos < hnTrail.length - 1,
             parent: hnParentIndex(rows, i) >= 0,
             child: hnFirstChildIndex(rows, i) >= 0,
             prev: hnPrevSiblingIndex(rows, i) >= 0 || hnParentIndex(rows, i) >= 0,
             next: hnAfterSubtreeIndex(rows, i) >= 0,
-            fold: hnAfterSubtreeIndex(rows, i) >= 0,
         };
         for (const [kind, b] of buttons)
             b.disabled = !state[kind];
@@ -700,6 +761,7 @@ function hnBuildSheet() {
     <div class="hn-sheet-panel" role="dialog" aria-modal="true" aria-label="HN Tweak settings">
       <div class="hn-sheet-grip"></div>
       <button type="button" class="hn-btn hn-top">Jump to top of thread</button>
+      <button type="button" class="hn-btn hn-fold">Collapse subtree &amp; advance</button>
 
       <h3>Theme</h3>
       <div class="hn-seg" role="radiogroup" aria-label="Theme">
@@ -736,6 +798,14 @@ function hnBuildSheet() {
         const rows = hnRows();
         if (rows.length)
             hnGoto(rows[hnRootIndex(rows, hnCurrentIndex(rows))]);
+        hnCloseSheet();
+    });
+    // "Collapse & advance" no longer needs a bar slot: HN's own [–] covers plain
+    // collapsing, and this lives here for when you want the advance too.
+    wrap.querySelector(".hn-fold")?.addEventListener("click", () => {
+        const rows = hnRows();
+        if (rows.length)
+            hnFoldAndAdvance(rows, hnCurrentIndex(rows));
         hnCloseSheet();
     });
     for (const b of wrap.querySelectorAll("[data-theme]")) {
@@ -855,11 +925,15 @@ function hnApplySettings(s) {
     }
 }
 let hnScrollRaf = 0;
+let hnCheckpointTimer = 0;
 function hnOnScroll() {
     // A real scroll (not ours) releases the jump anchor.
     if (hnOverrideRow && hnScrollFrame === 0 && Math.abs(window.scrollY - hnProgrammaticY) > 4) {
         hnOverrideRow = null;
     }
+    // Once scrolling settles, a long manual scroll becomes a stop of its own.
+    clearTimeout(hnCheckpointTimer);
+    hnCheckpointTimer = window.setTimeout(hnTrailCheckpoint, 600);
     if (hnScrollRaf)
         return;
     hnScrollRaf = requestAnimationFrame(() => {

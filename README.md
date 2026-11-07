@@ -52,17 +52,30 @@ rightmost:
 
 | Button | Goes to |
 | --- | --- |
-| `back` | where you were before the last jump, exact scroll offset included |
-| `fold` | collapse the subtree, then jump past it |
+| `back` | the previous stop on the reading trail |
+| `forward` | the next stop on the trail |
 | `parent` | one level up |
 | `child` | first reply |
 | `prev` | previous sibling, or up to the parent when this is a first child |
 | `next` | next sibling, or the parent's next sibling when this is the last child |
 
-`back` is a 50-entry undo stack: every jump pushes where you left from
-(including jumps made from the control panel), and back pops it. Pressing
-back never records a new entry, so repeated presses walk the history out
-instead of oscillating.
+Back/forward walk a single trail of *stops* — places you came to rest,
+whether you got there by jumping or by scrolling. A stack of jumps alone goes
+stale as soon as you scroll: after reading on for a screen or two, the jump
+you would undo is no longer related to where you are, so back teleports.
+
+So scrolling also leaves stops. Once scrolling settles for 600ms, a manual
+scroll that moved more than 1.5 viewports and landed on a different comment
+becomes a stop of its own. Back then returns to where that scroll *started*
+rather than jumping past everything you just read. A new stop truncates the
+forward branch, as a browser does. The trail is capped at 60 entries.
+
+There is no time-based expiry: reading a long comment can take minutes, so
+elapsed time says nothing about whether a stop is still relevant. Distance
+does.
+
+`fold` moved into the control panel as "Collapse subtree & advance" — HN's own
+`[–]` already covers plain collapsing, so it no longer needs a bar slot.
 
 A gear sits to the left of the bar as its own chip rather than a seventh
 button, and opens the control panel. It stays put when the bar itself is
