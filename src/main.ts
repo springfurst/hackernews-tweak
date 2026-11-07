@@ -3,11 +3,11 @@
  *
  * The stylesheet does the reading work. This script injects it, pushes
  * settings into CSS custom properties on <html>, and adds a thumb-reachable
- * comment navigation bar.
+ * comment navigation bar plus a settings sheet.
  *
  * Nothing here restructures HN's DOM: `hn.js` derives the comment tree from
  * the `indent` attribute and collapses by toggling `coll`/`noshow`, so we only
- * add attributes, classes and one fixed-position element.
+ * add attributes, classes and a couple of fixed-position elements.
  */
 
 interface HnSettings {
@@ -49,6 +49,7 @@ const HN_DEFAULTS: HnSettings = {
 declare function GM_addStyle(css: string): void;
 declare function GM_getValue<T>(key: string, fallback: T): T;
 declare function GM_setValue(key: string, value: unknown): void;
+declare function GM_registerMenuCommand(name: string, fn: () => void): void;
 
 const hnStore = {
   get<T>(key: string, fallback: T): T {
@@ -76,6 +77,10 @@ const hnStore = {
   },
 };
 
+/* ------------------------------------------------------------------ */
+/* Settings                                                            */
+/* ------------------------------------------------------------------ */
+
 function hnReadSettings(): HnSettings {
   const stored = hnStore.get<Partial<HnSettings> | null>(HN_SETTINGS_KEY, null);
   return stored && typeof stored === "object"
@@ -83,13 +88,16 @@ function hnReadSettings(): HnSettings {
     : { ...HN_DEFAULTS };
 }
 
-function hnSaveSettings(s: HnSettings): void {
-  hnStore.set(HN_SETTINGS_KEY, s);
+let hnSettings: HnSettings = { ...HN_DEFAULTS };
+
+/** Single write path: everything (panel, console API, reset) goes through here. */
+function hnUpdate(next: Partial<HnSettings>): void {
+  hnSettings = { ...hnSettings, ...next };
+  hnApplySettings(hnSettings);
+  hnStore.set(HN_SETTINGS_KEY, hnSettings);
 }
 
 const hnDarkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-
-let hnCurrent: HnSettings = { ...HN_DEFAULTS };
 
 function hnPrefersDark(theme: HnSettings["theme"]): boolean {
   return theme === "dark" || (theme === "auto" && hnDarkQuery.matches);
@@ -185,24 +193,14 @@ function hnUpdateDepths(): void {
     if (!comhead) continue;
     const depth = hnDepth(row);
     comhead.setAttribute("data-depth", String(depth));
-    comhead.classList.toggle("hn-deep", depth > hnCurrent.indentCap);
+    comhead.classList.toggle("hn-deep", depth > hnSettings.indentCap);
   }
 }
 
 /* ------------------------------------------------------------------ */
-/* Navigation                                                          */
+/* Scroll animation                                                    */
 /* ------------------------------------------------------------------ */
 
-const HN_ICONS: Record<string, string> = {
-  top: '<path d="M8 13V4M4 8l4-4 4 4M3 2h10"/>',
-  parent: '<path d="M8 13V4M4 8l4-4 4 4"/>',
-  child: '<path d="M8 3v9M4 8l4 4 4-4"/>',
-  prev: '<path d="M10 3L5 8l5 5"/>',
-  next: '<path d="M6 3l5 5-5 5"/>',
-  fold: '<path d="M3 2h10M4 6l4 4 4-4"/>',
-};
-
-let hnFlashTimer = 0;
 let hnScrollFrame = 0;
 
 /**
@@ -214,11 +212,7 @@ function hnScrollTo(targetY: number): void {
   cancelAnimationFrame(hnScrollFrame);
   const startY = window.scrollY;
   const delta = targetY - startY;
-  if (Math.abs(delta) < 2) {
-    window.scrollTo(0, targetY);
-    return;
-  }
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  if (Math.abs(delta) < 2 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     window.scrollTo(0, targetY);
     return;
   }
@@ -258,6 +252,8 @@ function hnEnsureVisible(rows: HTMLElement[], i: number): void {
   }
 }
 
+let hnFlashTimer = 0;
+
 function hnGoto(row: HTMLElement | undefined): void {
   if (!row) return;
   hnScrollTo(row.getBoundingClientRect().top + window.scrollY - HN_NAV_OFFSET);
@@ -276,17 +272,28 @@ function hnGoto(row: HTMLElement | undefined): void {
  */
 function hnFoldAndAdvance(rows: HTMLElement[], i: number): void {
   const row = rows[i];
-  const hasChildren =
-    i + 1 < rows.length && hnDepth(rows[i + 1]) > hnDepth(row);
+  const hasChildren = i + 1 < rows.length && hnDepth(rows[i + 1]) > hnDepth(row);
 
   if (hasChildren && !row.classList.contains("coll")) {
-    const togg = row.querySelector<HTMLElement>(".togg");
-    togg?.click();
+    row.querySelector<HTMLElement>(".togg")?.click();
   }
 
   const next = hnAfterSubtreeIndex(rows, i);
   hnGoto(next >= 0 ? rows[next] : rows[i + 1]);
 }
+
+/* ------------------------------------------------------------------ */
+/* Navigation bar                                                      */
+/* ------------------------------------------------------------------ */
+
+const HN_ICONS: Record<string, string> = {
+  parent: '<path d="M8 13V4M4 8l4-4 4 4"/>',
+  child: '<path d="M8 3v9M4 8l4 4 4-4"/>',
+  prev: '<path d="M10 3L5 8l5 5"/>',
+  next: '<path d="M6 3l5 5-5 5"/>',
+  fold: '<path d="M3 2h10M4 6l4 4 4-4"/>',
+  settings: '<path d="M3 5h10M3 11h10"/><circle cx="6" cy="5" r="1.7"/><circle cx="10" cy="11" r="1.7"/>',
+};
 
 interface HnNav {
   refresh: () => void;
@@ -295,6 +302,14 @@ interface HnNav {
 function hnBuildNav(): HnNav | null {
   if (document.documentElement.getAttribute("op") !== "item") return null;
   if (hnRows().length === 0) return null;
+
+  const gear = document.createElement("button");
+  gear.type = "button";
+  gear.id = "hn-gear";
+  gear.setAttribute("aria-label", "HN Tweak settings");
+  gear.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${HN_ICONS.settings}</svg>`;
+  gear.addEventListener("click", hnOpenSheet);
+  document.body.appendChild(gear);
 
   const bar = document.createElement("nav");
   bar.id = "hn-nav";
@@ -326,7 +341,9 @@ function hnBuildNav(): HnNav | null {
     bar.appendChild(b);
   };
 
-  add("top", "top", (rows, i) => go(rows, hnRootIndex(rows, i)));
+  // Left to right: the rarely-used action first, the ones a right thumb
+  // reaches for (next/prev, parent/child) last.
+  add("fold", "fold", (rows, i) => hnFoldAndAdvance(rows, i));
   add("parent", "parent", (rows, i) => go(rows, hnParentIndex(rows, i)));
   add("child", "child", (rows, i) => go(rows, hnFirstChildIndex(rows, i)));
   add("prev", "prev", (rows, i) => go(rows, hnPrevSiblingIndex(rows, i)));
@@ -335,7 +352,6 @@ function hnBuildNav(): HnNav | null {
     const sib = hnNextSiblingIndex(rows, i);
     go(rows, sib >= 0 ? sib : i + 1);
   });
-  add("fold", "fold", (rows, i) => hnFoldAndAdvance(rows, i));
 
   let refRow: HTMLElement | null = null;
 
@@ -351,7 +367,6 @@ function hnBuildNav(): HnNav | null {
     }
 
     const state: Record<string, boolean> = {
-      top: hnRootIndex(rows, i) !== i,
       parent: hnParentIndex(rows, i) >= 0,
       child: hnFirstChildIndex(rows, i) >= 0,
       prev: hnPrevSiblingIndex(rows, i) >= 0,
@@ -362,12 +377,144 @@ function hnBuildNav(): HnNav | null {
   };
 
   document.body.appendChild(bar);
-  document.documentElement.classList.add("hn-nav-on");
   for (const ev of ["touchstart", "wheel", "keydown"] as const) {
     window.addEventListener(ev, hnCancelScroll, { passive: true });
   }
   refresh();
   return { refresh };
+}
+
+/* ------------------------------------------------------------------ */
+/* Settings sheet                                                      */
+/* ------------------------------------------------------------------ */
+
+function hnSheet(): HTMLElement | null {
+  return document.getElementById("hn-sheet");
+}
+
+function hnOpenSheet(): void {
+  const sheet = hnSheet();
+  if (!sheet) return;
+  hnSyncSheet();
+  sheet.hidden = false;
+}
+
+function hnCloseSheet(): void {
+  const sheet = hnSheet();
+  if (sheet) sheet.hidden = true;
+}
+
+function hnSyncSheet(): void {
+  const sheet = hnSheet();
+  if (!sheet) return;
+
+  for (const b of sheet.querySelectorAll<HTMLElement>("[data-theme]")) {
+    b.setAttribute("aria-checked", String(b.dataset.theme === hnSettings.theme));
+  }
+
+  const bind = (id: string, value: number, suffix: string): void => {
+    const input = sheet.querySelector<HTMLInputElement>(`#${id}`);
+    const out = sheet.querySelector<HTMLElement>(`#${id}-out`);
+    if (input) input.value = String(value);
+    if (out) out.textContent = `${value}${suffix}`;
+  };
+  bind("hn-fs", hnSettings.fontSize, "px");
+  bind("hn-step", hnSettings.indentStep, "px");
+  bind("hn-cap", hnSettings.indentCap, "");
+
+  const remember = sheet.querySelector<HTMLInputElement>("#hn-remember");
+  if (remember) remember.checked = hnSettings.rememberPosition;
+
+  const navBar = sheet.querySelector<HTMLInputElement>("#hn-navbar");
+  if (navBar) navBar.checked = hnSettings.navBar;
+}
+
+function hnBuildSheet(): void {
+  if (hnSheet()) return;
+
+  const wrap = document.createElement("div");
+  wrap.id = "hn-sheet";
+  wrap.hidden = true;
+  wrap.innerHTML = `
+    <div class="hn-sheet-backdrop"></div>
+    <div class="hn-sheet-panel" role="dialog" aria-modal="true" aria-label="HN Tweak settings">
+      <div class="hn-sheet-grip"></div>
+      <button type="button" class="hn-btn hn-top">Jump to top of thread</button>
+
+      <h3>Theme</h3>
+      <div class="hn-seg" role="radiogroup" aria-label="Theme">
+        <button type="button" data-theme="auto" role="radio">Auto</button>
+        <button type="button" data-theme="light" role="radio">Light</button>
+        <button type="button" data-theme="dark" role="radio">Dark</button>
+      </div>
+
+      <h3>Reading</h3>
+      <div class="hn-field">
+        <label for="hn-fs">Font size <output id="hn-fs-out"></output></label>
+        <input id="hn-fs" type="range" min="13" max="20" step="1">
+      </div>
+      <div class="hn-field">
+        <label for="hn-step">Indent step <output id="hn-step-out"></output></label>
+        <input id="hn-step" type="range" min="6" max="14" step="1">
+      </div>
+      <div class="hn-field">
+        <label for="hn-cap">Indent cap <output id="hn-cap-out"></output></label>
+        <input id="hn-cap" type="range" min="3" max="12" step="1">
+      </div>
+      <label class="hn-check"><input id="hn-remember" type="checkbox"> Remember reading position</label>
+
+      <h3>Chrome</h3>
+      <label class="hn-check"><input id="hn-navbar" type="checkbox"> Navigation bar</label>
+
+      <button type="button" class="hn-btn hn-reset">Reset to defaults</button>
+      <button type="button" class="hn-btn hn-done">Done</button>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  wrap.querySelector(".hn-sheet-backdrop")?.addEventListener("click", hnCloseSheet);
+  wrap.querySelector(".hn-done")?.addEventListener("click", hnCloseSheet);
+  wrap.querySelector(".hn-top")?.addEventListener("click", () => {
+    const rows = hnRows();
+    if (rows.length) hnGoto(rows[hnRootIndex(rows, hnCurrentIndex(rows))]);
+    hnCloseSheet();
+  });
+
+  for (const b of wrap.querySelectorAll<HTMLElement>("[data-theme]")) {
+    b.addEventListener("click", () => {
+      const theme = b.dataset.theme as HnSettings["theme"];
+      hnUpdate({ theme });
+      hnSyncSheet();
+    });
+  }
+
+  const wireRange = (id: string, key: "fontSize" | "indentStep" | "indentCap", suffix: string): void => {
+    const input = wrap.querySelector<HTMLInputElement>(`#${id}`);
+    const out = wrap.querySelector<HTMLElement>(`#${id}-out`);
+    input?.addEventListener("input", () => {
+      const value = Number(input.value);
+      if (out) out.textContent = `${value}${suffix}`;
+      hnUpdate({ [key]: value } as Partial<HnSettings>);
+    });
+  };
+  wireRange("hn-fs", "fontSize", "px");
+  wireRange("hn-step", "indentStep", "px");
+  wireRange("hn-cap", "indentCap", "");
+
+  wrap.querySelector<HTMLInputElement>("#hn-remember")?.addEventListener("change", (e) => {
+    hnUpdate({ rememberPosition: (e.target as HTMLInputElement).checked });
+  });
+  wrap.querySelector<HTMLInputElement>("#hn-navbar")?.addEventListener("change", (e) => {
+    hnUpdate({ navBar: (e.target as HTMLInputElement).checked });
+  });
+
+  wrap.querySelector(".hn-reset")?.addEventListener("click", () => {
+    hnUpdate({ ...HN_DEFAULTS });
+    hnSyncSheet();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hnCloseSheet();
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -387,7 +534,7 @@ function hnPosKey(): string | null {
 }
 
 function hnSavePosition(): void {
-  if (!hnCurrent.rememberPosition) return;
+  if (!hnSettings.rememberPosition) return;
   const key = hnPosKey();
   if (!key) return;
   const rows = hnRows();
@@ -403,7 +550,7 @@ function hnSavePosition(): void {
 let hnRestored = false;
 
 function hnRestorePosition(): void {
-  if (hnRestored || !hnCurrent.rememberPosition) return;
+  if (hnRestored || !hnSettings.rememberPosition) return;
   const key = hnPosKey();
   if (!key) return;
   if (location.hash) return; // an explicit permalink wins
@@ -413,8 +560,7 @@ function hnRestorePosition(): void {
   const row = document.getElementById(saved.cid);
   if (!row) return;
   hnRestored = true;
-  const top = row.getBoundingClientRect().top + window.scrollY - (saved.dy || 0);
-  window.scrollTo(0, top);
+  window.scrollTo(0, row.getBoundingClientRect().top + window.scrollY - (saved.dy || 0));
 }
 
 /* ------------------------------------------------------------------ */
@@ -433,8 +579,10 @@ function hnInjectStyle(css: string): void {
   (document.head ?? document.documentElement).appendChild(el);
 }
 
+let hnNav: HnNav | null = null;
+let hnLastCap = -1;
+
 function hnApplySettings(s: HnSettings): void {
-  hnCurrent = s;
   const root = document.documentElement;
   const style = root.style;
 
@@ -446,17 +594,22 @@ function hnApplySettings(s: HnSettings): void {
   style.setProperty("--hn-step", `${s.indentStep}px`);
 
   for (let n = 0; n <= HN_MAX_INDENT; n++) {
-    const width = Math.min(n, s.indentCap) * s.indentStep;
-    style.setProperty(`--hn-w-${n}`, `${width}px`);
+    style.setProperty(`--hn-w-${n}`, `${Math.min(n, s.indentCap) * s.indentStep}px`);
   }
 
   root.classList.toggle("hn-dark", hnPrefersDark(s.theme));
-  root.classList.toggle("hn-nav-on", s.navBar && hnNav !== null);
+  root.classList.toggle("hn-chrome", hnNav !== null);
+  root.classList.toggle("hn-nav-on", hnNav !== null && s.navBar);
 
-  hnUpdateDepths();
+  // Only the badge threshold depends on indentCap; skip the DOM walk on every
+  // font-size or indent-step slider tick.
+  if (s.indentCap !== hnLastCap) {
+    hnLastCap = s.indentCap;
+    hnUpdateDepths();
+  }
 }
 
-let hnNav: HnNav | null = null;
+let hnScrollRaf = 0;
 
 function hnOnScroll(): void {
   if (hnScrollRaf) return;
@@ -467,20 +620,23 @@ function hnOnScroll(): void {
   });
 }
 
-let hnScrollRaf = 0;
-
 function hnStart(): void {
-  let settings = hnReadSettings();
-  hnApplySettings(settings);
+  hnSettings = hnReadSettings();
+  hnApplySettings(hnSettings);
 
   const boot = (): void => {
     hnNav = hnBuildNav();
-    hnApplySettings(settings);
+    hnBuildSheet();
+    hnApplySettings(hnSettings);
     hnRestorePosition();
 
     window.addEventListener("scroll", hnOnScroll, { passive: true });
     window.addEventListener("pagehide", hnSavePosition);
     window.addEventListener("resize", () => hnNav?.refresh(), { passive: true });
+
+    if (typeof GM_registerMenuCommand === "function") {
+      GM_registerMenuCommand("HN Tweak settings", hnOpenSheet);
+    }
   };
 
   if (document.readyState === "loading") {
@@ -489,18 +645,14 @@ function hnStart(): void {
     boot();
   }
 
-  hnDarkQuery.addEventListener("change", () => hnApplySettings(settings));
+  hnDarkQuery.addEventListener("change", () => hnApplySettings(hnSettings));
 
-  // Exposed for the browser console and for the settings UI.
   (window as unknown as { hnTweak: unknown }).hnTweak = {
     get settings() {
-      return settings;
+      return hnSettings;
     },
-    apply(next: Partial<HnSettings>) {
-      settings = { ...settings, ...next };
-      hnApplySettings(settings);
-      hnSaveSettings(settings);
-    },
+    apply: hnUpdate,
+    openSettings: hnOpenSheet,
   };
 }
 

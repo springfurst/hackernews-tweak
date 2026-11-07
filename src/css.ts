@@ -151,10 +151,26 @@ textarea[name="text"]{height:6.5em!important;min-height:0!important}
 table.comment-tree .comment a{max-width:none!important;white-space:normal!important;word-break:break-word!important;overflow:visible!important;text-overflow:clip!important;display:inline!important}
 
 /* ---- comment navigation bar ---- */
-html.hn-nav-on body{padding-bottom:calc(58px + env(safe-area-inset-bottom))!important}
+html.hn-chrome body{padding-bottom:calc(58px + env(safe-area-inset-bottom))!important}
+html:not(.hn-chrome) #hn-nav,html:not(.hn-chrome) #hn-gear{display:none!important}
 html:not(.hn-nav-on) #hn-nav{display:none!important}
+
+/* Settings live in their own chip beside the bar rather than as a seventh
+   button, and stay reachable when the bar itself is switched off. */
+#hn-gear{
+  position:fixed;left:0;bottom:0;z-index:9000;
+  display:flex;align-items:center;justify-content:center;
+  width:46px;min-height:55px;
+  padding:4px 0 calc(4px + env(safe-area-inset-bottom));
+  background:var(--hn-nav-bg);color:var(--hn-nav-fg);
+  border:0;border-top:1px solid var(--hn-nav-line);border-right:1px solid var(--hn-nav-line);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+#hn-gear:active{background:var(--hn-nav-active)}
+#hn-gear svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
 #hn-nav{
-  position:fixed;left:0;right:0;bottom:0;z-index:9000;
+  position:fixed;left:46px;right:0;bottom:0;z-index:9000;
   display:flex;gap:2px;
   padding:4px 4px calc(4px + env(safe-area-inset-bottom));
   background:var(--hn-nav-bg);
@@ -185,6 +201,36 @@ tr.hn-ref td.default{box-shadow:inset -3px 0 0 var(--hn-accent)}
 
 /* enlarge the [–] collapse target without shifting layout */
 .comhead .togg{padding:6px 12px 6px 2px;margin:-6px -12px -6px -2px}
+
+/* ---- settings sheet ---- */
+#hn-sheet{position:fixed;inset:0;z-index:9500}
+#hn-sheet[hidden]{display:none!important}
+.hn-sheet-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.5)}
+.hn-sheet-panel{
+  position:absolute;left:0;right:0;bottom:0;
+  max-height:84vh;overflow-y:auto;overscroll-behavior:contain;
+  padding:10px 18px calc(20px + env(safe-area-inset-bottom));
+  background:var(--hn-nav-bg);color:var(--hn-fg);
+  border-radius:14px 14px 0 0;
+  box-shadow:0 -10px 34px rgba(0,0,0,.4);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  animation:hn-sheet-in .18s ease-out;
+}
+@keyframes hn-sheet-in{from{transform:translateY(16px);opacity:.5}to{transform:none;opacity:1}}
+.hn-sheet-grip{width:38px;height:4px;border-radius:2px;background:var(--hn-nav-line);margin:0 auto 14px}
+#hn-sheet h3{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--hn-muted);margin:18px 0 8px;font-weight:600}
+.hn-seg{display:flex;gap:6px}
+.hn-seg button{flex:1;padding:10px 0;border:1px solid var(--hn-nav-line);border-radius:8px;background:transparent;color:var(--hn-fg);font:inherit;font-size:13px;cursor:pointer}
+.hn-seg button[aria-checked="true"]{background:var(--hn-accent);border-color:var(--hn-accent);color:var(--hn-bg)}
+.hn-field{margin:12px 0}
+.hn-field label{display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px}
+.hn-field output{color:var(--hn-muted);font-variant-numeric:tabular-nums}
+.hn-field input[type="range"]{width:100%;accent-color:var(--hn-accent)}
+.hn-check{display:flex;align-items:center;gap:9px;font-size:14px;margin:12px 0;cursor:pointer}
+.hn-check input{width:18px;height:18px;accent-color:var(--hn-accent)}
+.hn-btn{display:block;width:100%;margin-top:12px;padding:12px;border:1px solid var(--hn-nav-line);border-radius:9px;background:transparent;color:var(--hn-fg);font:inherit;font-size:14px;cursor:pointer}
+.hn-btn:active{background:var(--hn-nav-active)}
+.hn-done{margin-top:16px;background:var(--hn-accent);border-color:var(--hn-accent);color:var(--hn-bg)}
 
 /* ---- dark ---- */
 html.hn-dark{color-scheme:dark}

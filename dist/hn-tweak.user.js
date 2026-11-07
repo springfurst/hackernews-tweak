@@ -148,10 +148,26 @@ textarea[name="text"]{height:6.5em!important;min-height:0!important}
 table.comment-tree .comment a{max-width:none!important;white-space:normal!important;word-break:break-word!important;overflow:visible!important;text-overflow:clip!important;display:inline!important}
 
 /* ---- comment navigation bar ---- */
-html.hn-nav-on body{padding-bottom:calc(58px + env(safe-area-inset-bottom))!important}
+html.hn-chrome body{padding-bottom:calc(58px + env(safe-area-inset-bottom))!important}
+html:not(.hn-chrome) #hn-nav,html:not(.hn-chrome) #hn-gear{display:none!important}
 html:not(.hn-nav-on) #hn-nav{display:none!important}
+
+/* Settings live in their own chip beside the bar rather than as a seventh
+   button, and stay reachable when the bar itself is switched off. */
+#hn-gear{
+  position:fixed;left:0;bottom:0;z-index:9000;
+  display:flex;align-items:center;justify-content:center;
+  width:46px;min-height:55px;
+  padding:4px 0 calc(4px + env(safe-area-inset-bottom));
+  background:var(--hn-nav-bg);color:var(--hn-nav-fg);
+  border:0;border-top:1px solid var(--hn-nav-line);border-right:1px solid var(--hn-nav-line);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+#hn-gear:active{background:var(--hn-nav-active)}
+#hn-gear svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
 #hn-nav{
-  position:fixed;left:0;right:0;bottom:0;z-index:9000;
+  position:fixed;left:46px;right:0;bottom:0;z-index:9000;
   display:flex;gap:2px;
   padding:4px 4px calc(4px + env(safe-area-inset-bottom));
   background:var(--hn-nav-bg);
@@ -182,6 +198,36 @@ tr.hn-ref td.default{box-shadow:inset -3px 0 0 var(--hn-accent)}
 
 /* enlarge the [–] collapse target without shifting layout */
 .comhead .togg{padding:6px 12px 6px 2px;margin:-6px -12px -6px -2px}
+
+/* ---- settings sheet ---- */
+#hn-sheet{position:fixed;inset:0;z-index:9500}
+#hn-sheet[hidden]{display:none!important}
+.hn-sheet-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.5)}
+.hn-sheet-panel{
+  position:absolute;left:0;right:0;bottom:0;
+  max-height:84vh;overflow-y:auto;overscroll-behavior:contain;
+  padding:10px 18px calc(20px + env(safe-area-inset-bottom));
+  background:var(--hn-nav-bg);color:var(--hn-fg);
+  border-radius:14px 14px 0 0;
+  box-shadow:0 -10px 34px rgba(0,0,0,.4);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  animation:hn-sheet-in .18s ease-out;
+}
+@keyframes hn-sheet-in{from{transform:translateY(16px);opacity:.5}to{transform:none;opacity:1}}
+.hn-sheet-grip{width:38px;height:4px;border-radius:2px;background:var(--hn-nav-line);margin:0 auto 14px}
+#hn-sheet h3{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--hn-muted);margin:18px 0 8px;font-weight:600}
+.hn-seg{display:flex;gap:6px}
+.hn-seg button{flex:1;padding:10px 0;border:1px solid var(--hn-nav-line);border-radius:8px;background:transparent;color:var(--hn-fg);font:inherit;font-size:13px;cursor:pointer}
+.hn-seg button[aria-checked="true"]{background:var(--hn-accent);border-color:var(--hn-accent);color:var(--hn-bg)}
+.hn-field{margin:12px 0}
+.hn-field label{display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px}
+.hn-field output{color:var(--hn-muted);font-variant-numeric:tabular-nums}
+.hn-field input[type="range"]{width:100%;accent-color:var(--hn-accent)}
+.hn-check{display:flex;align-items:center;gap:9px;font-size:14px;margin:12px 0;cursor:pointer}
+.hn-check input{width:18px;height:18px;accent-color:var(--hn-accent)}
+.hn-btn{display:block;width:100%;margin-top:12px;padding:12px;border:1px solid var(--hn-nav-line);border-radius:9px;background:transparent;color:var(--hn-fg);font:inherit;font-size:14px;cursor:pointer}
+.hn-btn:active{background:var(--hn-nav-active)}
+.hn-done{margin-top:16px;background:var(--hn-accent);border-color:var(--hn-accent);color:var(--hn-bg)}
 
 /* ---- dark ---- */
 html.hn-dark{color-scheme:dark}
@@ -223,11 +269,11 @@ html.hn-dark .reply a:link,html.hn-dark .reply a:visited{color:var(--hn-muted)!i
  *
  * The stylesheet does the reading work. This script injects it, pushes
  * settings into CSS custom properties on <html>, and adds a thumb-reachable
- * comment navigation bar.
+ * comment navigation bar plus a settings sheet.
  *
  * Nothing here restructures HN's DOM: `hn.js` derives the comment tree from
  * the `indent` attribute and collapses by toggling `coll`/`noshow`, so we only
- * add attributes, classes and one fixed-position element.
+ * add attributes, classes and a couple of fixed-position elements.
  */
 const HN_MAX_INDENT = 21;
 const HN_SETTINGS_KEY = "hn-tweak:settings";
@@ -271,17 +317,23 @@ const hnStore = {
         }
     },
 };
+/* ------------------------------------------------------------------ */
+/* Settings                                                            */
+/* ------------------------------------------------------------------ */
 function hnReadSettings() {
     const stored = hnStore.get(HN_SETTINGS_KEY, null);
     return stored && typeof stored === "object"
         ? { ...HN_DEFAULTS, ...stored }
         : { ...HN_DEFAULTS };
 }
-function hnSaveSettings(s) {
-    hnStore.set(HN_SETTINGS_KEY, s);
+let hnSettings = { ...HN_DEFAULTS };
+/** Single write path: everything (panel, console API, reset) goes through here. */
+function hnUpdate(next) {
+    hnSettings = { ...hnSettings, ...next };
+    hnApplySettings(hnSettings);
+    hnStore.set(HN_SETTINGS_KEY, hnSettings);
 }
 const hnDarkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-let hnCurrent = { ...HN_DEFAULTS };
 function hnPrefersDark(theme) {
     return theme === "dark" || (theme === "auto" && hnDarkQuery.matches);
 }
@@ -379,21 +431,12 @@ function hnUpdateDepths() {
             continue;
         const depth = hnDepth(row);
         comhead.setAttribute("data-depth", String(depth));
-        comhead.classList.toggle("hn-deep", depth > hnCurrent.indentCap);
+        comhead.classList.toggle("hn-deep", depth > hnSettings.indentCap);
     }
 }
 /* ------------------------------------------------------------------ */
-/* Navigation                                                          */
+/* Scroll animation                                                    */
 /* ------------------------------------------------------------------ */
-const HN_ICONS = {
-    top: '<path d="M8 13V4M4 8l4-4 4 4M3 2h10"/>',
-    parent: '<path d="M8 13V4M4 8l4-4 4 4"/>',
-    child: '<path d="M8 3v9M4 8l4 4 4-4"/>',
-    prev: '<path d="M10 3L5 8l5 5"/>',
-    next: '<path d="M6 3l5 5-5 5"/>',
-    fold: '<path d="M3 2h10M4 6l4 4 4-4"/>',
-};
-let hnFlashTimer = 0;
 let hnScrollFrame = 0;
 /**
  * Animate the scroll ourselves instead of using `behavior: "smooth"`.
@@ -404,11 +447,7 @@ function hnScrollTo(targetY) {
     cancelAnimationFrame(hnScrollFrame);
     const startY = window.scrollY;
     const delta = targetY - startY;
-    if (Math.abs(delta) < 2) {
-        window.scrollTo(0, targetY);
-        return;
-    }
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (Math.abs(delta) < 2 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         window.scrollTo(0, targetY);
         return;
     }
@@ -445,6 +484,7 @@ function hnEnsureVisible(rows, i) {
         i = p;
     }
 }
+let hnFlashTimer = 0;
 function hnGoto(row) {
     if (!row)
         return;
@@ -464,17 +504,34 @@ function hnFoldAndAdvance(rows, i) {
     const row = rows[i];
     const hasChildren = i + 1 < rows.length && hnDepth(rows[i + 1]) > hnDepth(row);
     if (hasChildren && !row.classList.contains("coll")) {
-        const togg = row.querySelector(".togg");
-        togg?.click();
+        row.querySelector(".togg")?.click();
     }
     const next = hnAfterSubtreeIndex(rows, i);
     hnGoto(next >= 0 ? rows[next] : rows[i + 1]);
 }
+/* ------------------------------------------------------------------ */
+/* Navigation bar                                                      */
+/* ------------------------------------------------------------------ */
+const HN_ICONS = {
+    parent: '<path d="M8 13V4M4 8l4-4 4 4"/>',
+    child: '<path d="M8 3v9M4 8l4 4 4-4"/>',
+    prev: '<path d="M10 3L5 8l5 5"/>',
+    next: '<path d="M6 3l5 5-5 5"/>',
+    fold: '<path d="M3 2h10M4 6l4 4 4-4"/>',
+    settings: '<path d="M3 5h10M3 11h10"/><circle cx="6" cy="5" r="1.7"/><circle cx="10" cy="11" r="1.7"/>',
+};
 function hnBuildNav() {
     if (document.documentElement.getAttribute("op") !== "item")
         return null;
     if (hnRows().length === 0)
         return null;
+    const gear = document.createElement("button");
+    gear.type = "button";
+    gear.id = "hn-gear";
+    gear.setAttribute("aria-label", "HN Tweak settings");
+    gear.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${HN_ICONS.settings}</svg>`;
+    gear.addEventListener("click", hnOpenSheet);
+    document.body.appendChild(gear);
     const bar = document.createElement("nav");
     bar.id = "hn-nav";
     bar.setAttribute("aria-label", "Comment navigation");
@@ -499,7 +556,9 @@ function hnBuildNav() {
         buttons.set(kind, b);
         bar.appendChild(b);
     };
-    add("top", "top", (rows, i) => go(rows, hnRootIndex(rows, i)));
+    // Left to right: the rarely-used action first, the ones a right thumb
+    // reaches for (next/prev, parent/child) last.
+    add("fold", "fold", (rows, i) => hnFoldAndAdvance(rows, i));
     add("parent", "parent", (rows, i) => go(rows, hnParentIndex(rows, i)));
     add("child", "child", (rows, i) => go(rows, hnFirstChildIndex(rows, i)));
     add("prev", "prev", (rows, i) => go(rows, hnPrevSiblingIndex(rows, i)));
@@ -508,7 +567,6 @@ function hnBuildNav() {
         const sib = hnNextSiblingIndex(rows, i);
         go(rows, sib >= 0 ? sib : i + 1);
     });
-    add("fold", "fold", (rows, i) => hnFoldAndAdvance(rows, i));
     let refRow = null;
     const refresh = () => {
         const rows = hnRows();
@@ -521,7 +579,6 @@ function hnBuildNav() {
             refRow = rows[i];
         }
         const state = {
-            top: hnRootIndex(rows, i) !== i,
             parent: hnParentIndex(rows, i) >= 0,
             child: hnFirstChildIndex(rows, i) >= 0,
             prev: hnPrevSiblingIndex(rows, i) >= 0,
@@ -532,12 +589,138 @@ function hnBuildNav() {
             b.disabled = !state[kind];
     };
     document.body.appendChild(bar);
-    document.documentElement.classList.add("hn-nav-on");
     for (const ev of ["touchstart", "wheel", "keydown"]) {
         window.addEventListener(ev, hnCancelScroll, { passive: true });
     }
     refresh();
     return { refresh };
+}
+/* ------------------------------------------------------------------ */
+/* Settings sheet                                                      */
+/* ------------------------------------------------------------------ */
+function hnSheet() {
+    return document.getElementById("hn-sheet");
+}
+function hnOpenSheet() {
+    const sheet = hnSheet();
+    if (!sheet)
+        return;
+    hnSyncSheet();
+    sheet.hidden = false;
+}
+function hnCloseSheet() {
+    const sheet = hnSheet();
+    if (sheet)
+        sheet.hidden = true;
+}
+function hnSyncSheet() {
+    const sheet = hnSheet();
+    if (!sheet)
+        return;
+    for (const b of sheet.querySelectorAll("[data-theme]")) {
+        b.setAttribute("aria-checked", String(b.dataset.theme === hnSettings.theme));
+    }
+    const bind = (id, value, suffix) => {
+        const input = sheet.querySelector(`#${id}`);
+        const out = sheet.querySelector(`#${id}-out`);
+        if (input)
+            input.value = String(value);
+        if (out)
+            out.textContent = `${value}${suffix}`;
+    };
+    bind("hn-fs", hnSettings.fontSize, "px");
+    bind("hn-step", hnSettings.indentStep, "px");
+    bind("hn-cap", hnSettings.indentCap, "");
+    const remember = sheet.querySelector("#hn-remember");
+    if (remember)
+        remember.checked = hnSettings.rememberPosition;
+    const navBar = sheet.querySelector("#hn-navbar");
+    if (navBar)
+        navBar.checked = hnSettings.navBar;
+}
+function hnBuildSheet() {
+    if (hnSheet())
+        return;
+    const wrap = document.createElement("div");
+    wrap.id = "hn-sheet";
+    wrap.hidden = true;
+    wrap.innerHTML = `
+    <div class="hn-sheet-backdrop"></div>
+    <div class="hn-sheet-panel" role="dialog" aria-modal="true" aria-label="HN Tweak settings">
+      <div class="hn-sheet-grip"></div>
+      <button type="button" class="hn-btn hn-top">Jump to top of thread</button>
+
+      <h3>Theme</h3>
+      <div class="hn-seg" role="radiogroup" aria-label="Theme">
+        <button type="button" data-theme="auto" role="radio">Auto</button>
+        <button type="button" data-theme="light" role="radio">Light</button>
+        <button type="button" data-theme="dark" role="radio">Dark</button>
+      </div>
+
+      <h3>Reading</h3>
+      <div class="hn-field">
+        <label for="hn-fs">Font size <output id="hn-fs-out"></output></label>
+        <input id="hn-fs" type="range" min="13" max="20" step="1">
+      </div>
+      <div class="hn-field">
+        <label for="hn-step">Indent step <output id="hn-step-out"></output></label>
+        <input id="hn-step" type="range" min="6" max="14" step="1">
+      </div>
+      <div class="hn-field">
+        <label for="hn-cap">Indent cap <output id="hn-cap-out"></output></label>
+        <input id="hn-cap" type="range" min="3" max="12" step="1">
+      </div>
+      <label class="hn-check"><input id="hn-remember" type="checkbox"> Remember reading position</label>
+
+      <h3>Chrome</h3>
+      <label class="hn-check"><input id="hn-navbar" type="checkbox"> Navigation bar</label>
+
+      <button type="button" class="hn-btn hn-reset">Reset to defaults</button>
+      <button type="button" class="hn-btn hn-done">Done</button>
+    </div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector(".hn-sheet-backdrop")?.addEventListener("click", hnCloseSheet);
+    wrap.querySelector(".hn-done")?.addEventListener("click", hnCloseSheet);
+    wrap.querySelector(".hn-top")?.addEventListener("click", () => {
+        const rows = hnRows();
+        if (rows.length)
+            hnGoto(rows[hnRootIndex(rows, hnCurrentIndex(rows))]);
+        hnCloseSheet();
+    });
+    for (const b of wrap.querySelectorAll("[data-theme]")) {
+        b.addEventListener("click", () => {
+            const theme = b.dataset.theme;
+            hnUpdate({ theme });
+            hnSyncSheet();
+        });
+    }
+    const wireRange = (id, key, suffix) => {
+        const input = wrap.querySelector(`#${id}`);
+        const out = wrap.querySelector(`#${id}-out`);
+        input?.addEventListener("input", () => {
+            const value = Number(input.value);
+            if (out)
+                out.textContent = `${value}${suffix}`;
+            hnUpdate({ [key]: value });
+        });
+    };
+    wireRange("hn-fs", "fontSize", "px");
+    wireRange("hn-step", "indentStep", "px");
+    wireRange("hn-cap", "indentCap", "");
+    wrap.querySelector("#hn-remember")?.addEventListener("change", (e) => {
+        hnUpdate({ rememberPosition: e.target.checked });
+    });
+    wrap.querySelector("#hn-navbar")?.addEventListener("change", (e) => {
+        hnUpdate({ navBar: e.target.checked });
+    });
+    wrap.querySelector(".hn-reset")?.addEventListener("click", () => {
+        hnUpdate({ ...HN_DEFAULTS });
+        hnSyncSheet();
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape")
+            hnCloseSheet();
+    });
 }
 function hnPosKey() {
     if (document.documentElement.getAttribute("op") !== "item")
@@ -546,7 +729,7 @@ function hnPosKey() {
     return id && /^\d+$/.test(id) ? HN_POS_PREFIX + id : null;
 }
 function hnSavePosition() {
-    if (!hnCurrent.rememberPosition)
+    if (!hnSettings.rememberPosition)
         return;
     const key = hnPosKey();
     if (!key)
@@ -564,7 +747,7 @@ function hnSavePosition() {
 }
 let hnRestored = false;
 function hnRestorePosition() {
-    if (hnRestored || !hnCurrent.rememberPosition)
+    if (hnRestored || !hnSettings.rememberPosition)
         return;
     const key = hnPosKey();
     if (!key)
@@ -580,8 +763,7 @@ function hnRestorePosition() {
     if (!row)
         return;
     hnRestored = true;
-    const top = row.getBoundingClientRect().top + window.scrollY - (saved.dy || 0);
-    window.scrollTo(0, top);
+    window.scrollTo(0, row.getBoundingClientRect().top + window.scrollY - (saved.dy || 0));
 }
 /* ------------------------------------------------------------------ */
 /* Wiring                                                              */
@@ -597,8 +779,9 @@ function hnInjectStyle(css) {
     el.textContent = css;
     (document.head ?? document.documentElement).appendChild(el);
 }
+let hnNav = null;
+let hnLastCap = -1;
 function hnApplySettings(s) {
-    hnCurrent = s;
     const root = document.documentElement;
     const style = root.style;
     style.setProperty("--hn-fs", `${s.fontSize}px`);
@@ -608,14 +791,19 @@ function hnApplySettings(s) {
     style.setProperty("--hn-lh", String(s.lineHeight));
     style.setProperty("--hn-step", `${s.indentStep}px`);
     for (let n = 0; n <= HN_MAX_INDENT; n++) {
-        const width = Math.min(n, s.indentCap) * s.indentStep;
-        style.setProperty(`--hn-w-${n}`, `${width}px`);
+        style.setProperty(`--hn-w-${n}`, `${Math.min(n, s.indentCap) * s.indentStep}px`);
     }
     root.classList.toggle("hn-dark", hnPrefersDark(s.theme));
-    root.classList.toggle("hn-nav-on", s.navBar && hnNav !== null);
-    hnUpdateDepths();
+    root.classList.toggle("hn-chrome", hnNav !== null);
+    root.classList.toggle("hn-nav-on", hnNav !== null && s.navBar);
+    // Only the badge threshold depends on indentCap; skip the DOM walk on every
+    // font-size or indent-step slider tick.
+    if (s.indentCap !== hnLastCap) {
+        hnLastCap = s.indentCap;
+        hnUpdateDepths();
+    }
 }
-let hnNav = null;
+let hnScrollRaf = 0;
 function hnOnScroll() {
     if (hnScrollRaf)
         return;
@@ -625,17 +813,20 @@ function hnOnScroll() {
         hnSavePosition();
     });
 }
-let hnScrollRaf = 0;
 function hnStart() {
-    let settings = hnReadSettings();
-    hnApplySettings(settings);
+    hnSettings = hnReadSettings();
+    hnApplySettings(hnSettings);
     const boot = () => {
         hnNav = hnBuildNav();
-        hnApplySettings(settings);
+        hnBuildSheet();
+        hnApplySettings(hnSettings);
         hnRestorePosition();
         window.addEventListener("scroll", hnOnScroll, { passive: true });
         window.addEventListener("pagehide", hnSavePosition);
         window.addEventListener("resize", () => hnNav?.refresh(), { passive: true });
+        if (typeof GM_registerMenuCommand === "function") {
+            GM_registerMenuCommand("HN Tweak settings", hnOpenSheet);
+        }
     };
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", boot, { once: true });
@@ -643,17 +834,13 @@ function hnStart() {
     else {
         boot();
     }
-    hnDarkQuery.addEventListener("change", () => hnApplySettings(settings));
-    // Exposed for the browser console and for the settings UI.
+    hnDarkQuery.addEventListener("change", () => hnApplySettings(hnSettings));
     window.hnTweak = {
         get settings() {
-            return settings;
+            return hnSettings;
         },
-        apply(next) {
-            settings = { ...settings, ...next };
-            hnApplySettings(settings);
-            hnSaveSettings(settings);
-        },
+        apply: hnUpdate,
+        openSettings: hnOpenSheet,
     };
 }
 if (location.hostname === "news.ycombinator.com") {

@@ -46,16 +46,22 @@ userscript metadata block. No bundler.
 ## Navigation
 
 On comment pages a fixed bar sits at the bottom, tracking whichever comment is
-at the top of the reading area:
+at the top of the reading area. It is ordered for a right thumb — the
+rarely-used action is leftmost, the ones you reach for are rightmost:
 
 | Button | Goes to |
 | --- | --- |
-| `top` | the thread's root comment |
+| `fold` | collapse the subtree, then jump past it |
 | `parent` | one level up |
 | `child` | first reply |
 | `prev` | previous sibling |
 | `next` | next sibling, falling back to the ancestor's next sibling so it always advances |
-| `fold` | collapse the subtree, then jump past it |
+
+A gear sits to the left of the bar as its own chip rather than a seventh
+button, and opens the control panel. It stays put when the bar itself is
+switched off, so settings are never unreachable. "Jump to top of thread" lives
+in that panel — it was the least-used bar button and gave the gear its slot
+without making the bar busier.
 
 Buttons disable themselves when there is nowhere to go, and the comment the bar
 is navigating from is marked with an accent bar on its right edge (the left gutter already
@@ -77,10 +83,16 @@ all stay consistent.
 Scrolling back to a thread resumes where you left off (7-day TTL, skipped when
 the URL has a `#permalink`).
 
-## Settings
+## Control panel
 
-v1 is stylesheet-only. Settings live in `GM_getValue("hn-tweak:settings")`
-(`localStorage` when the GM API is absent) and can be poked from the console:
+Tap the gear to open a bottom sheet with theme, font size, indent step, indent
+cap, remember-position and navigation-bar toggles, plus reset. Changes apply
+live behind the sheet and persist to `GM_setValue("hn-tweak:settings")`
+(`localStorage` when the GM API is absent). Close with Done, the backdrop, or
+Escape. The same sheet is registered as a userscript menu command
+(`HN Tweak settings`) as a second way in.
+
+Everything can also be driven from the console:
 
 ```js
 hnTweak.apply({ theme: "dark" });   // "auto" | "light" | "dark"
@@ -111,7 +123,7 @@ injected once and never rebuilt.
 - [x] Thumb-reachable comment nav (top / parent / child / prev / next / fold)
 - [x] Remember reading position per thread
 - [x] Collapse-and-advance
-- [ ] Minimal settings sheet
+- [x] Minimal settings sheet
 
 [Violentmonkey]: https://addons.mozilla.org/android/addon/violentmonkey/
 [Tampermonkey]: https://addons.mozilla.org/android/addon/tampermonkey/
