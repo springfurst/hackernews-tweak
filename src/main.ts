@@ -261,16 +261,55 @@ function hnEnsureVisible(rows: HTMLElement[], i: number): void {
 
 let hnFlashTimer = 0;
 
-function hnGoto(row: HTMLElement | undefined): void {
-  if (!row) return;
-  hnOverrideRow = row;
-  hnScrollTo(row.getBoundingClientRect().top + window.scrollY - HN_NAV_OFFSET);
-
+function hnFlash(row: HTMLElement): void {
   row.classList.remove("hn-flash");
   void row.offsetWidth; // restart the animation
   row.classList.add("hn-flash");
   clearTimeout(hnFlashTimer);
   hnFlashTimer = window.setTimeout(() => row.classList.remove("hn-flash"), 1400);
+}
+
+interface HnHistoryEntry {
+  row: HTMLElement;
+  /** The row's viewport offset when we left it, so back restores the exact spot. */
+  dy: number;
+}
+
+const HN_HISTORY_MAX = 50;
+const hnHistory: HnHistoryEntry[] = [];
+
+function hnPushHistory(target: HTMLElement): void {
+  const rows = hnRows();
+  const from = rows[hnCurrentIndex(rows)];
+  if (!from || from === target) return;
+  hnHistory.push({ row: from, dy: Math.round(from.getBoundingClientRect().top) });
+  if (hnHistory.length > HN_HISTORY_MAX) hnHistory.shift();
+}
+
+function hnGoto(row: HTMLElement | undefined, record = true): void {
+  if (!row) return;
+  if (record) hnPushHistory(row);
+  hnOverrideRow = row;
+  hnScrollTo(row.getBoundingClientRect().top + window.scrollY - HN_NAV_OFFSET);
+  hnFlash(row);
+  hnNav?.refresh();
+}
+
+/** Return to where we were before the last jump, exact offset included. */
+function hnGoBack(): void {
+  const rows = hnRows();
+  while (hnHistory.length > 0) {
+    const entry = hnHistory.pop();
+    if (!entry || !entry.row.isConnected) continue;
+    const idx = rows.indexOf(entry.row);
+    if (idx < 0) continue;
+    hnEnsureVisible(rows, idx);
+    hnOverrideRow = entry.row;
+    hnScrollTo(entry.row.getBoundingClientRect().top + window.scrollY - entry.dy);
+    hnFlash(entry.row);
+    hnNav?.refresh();
+    return;
+  }
 }
 
 /**
@@ -295,6 +334,7 @@ function hnFoldAndAdvance(rows: HTMLElement[], i: number): void {
 /* ------------------------------------------------------------------ */
 
 const HN_ICONS: Record<string, string> = {
+  back: '<path d="M6 4L3 7l3 3"/><path d="M3 7h6.5a4 4 0 0 1 0 8H8"/>',
   parent: '<path d="M8 13V4M4 8l4-4 4 4"/>',
   child: '<path d="M8 3v9M4 8l4 4 4-4"/>',
   prev: '<path d="M10 3L5 8l5 5"/>',
@@ -349,8 +389,9 @@ function hnBuildNav(): HnNav | null {
     bar.appendChild(b);
   };
 
-  // Left to right: the rarely-used action first, the ones a right thumb
-  // reaches for (next/prev, parent/child) last.
+  // Left to right: back/undo and fold first, the ones a right thumb reaches
+  // for (next/prev, parent/child) last.
+  add("back", "back", () => hnGoBack());
   add("fold", "fold", (rows, i) => hnFoldAndAdvance(rows, i));
   add("parent", "parent", (rows, i) => go(rows, hnParentIndex(rows, i)));
   add("child", "child", (rows, i) => go(rows, hnFirstChildIndex(rows, i)));
@@ -382,6 +423,7 @@ function hnBuildNav(): HnNav | null {
     }
 
     const state: Record<string, boolean> = {
+      back: hnHistory.length > 0,
       parent: hnParentIndex(rows, i) >= 0,
       child: hnFirstChildIndex(rows, i) >= 0,
       prev: hnPrevSiblingIndex(rows, i) >= 0 || hnParentIndex(rows, i) >= 0,

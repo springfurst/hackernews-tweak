@@ -47,15 +47,22 @@ userscript metadata block. No bundler.
 
 On comment pages a fixed bar sits at the bottom, tracking whichever comment is
 at the top of the reading area. It is ordered for a right thumb — the
-rarely-used action is leftmost, the ones you reach for are rightmost:
+recovery and rarely-used actions are leftmost, the ones you reach for are
+rightmost:
 
 | Button | Goes to |
 | --- | --- |
+| `back` | where you were before the last jump, exact scroll offset included |
 | `fold` | collapse the subtree, then jump past it |
 | `parent` | one level up |
 | `child` | first reply |
 | `prev` | previous sibling, or up to the parent when this is a first child |
 | `next` | next sibling, or the parent's next sibling when this is the last child |
+
+`back` is a 50-entry undo stack: every jump pushes where you left from
+(including jumps made from the control panel), and back pops it. Pressing
+back never records a new entry, so repeated presses walk the history out
+instead of oscillating.
 
 A gear sits to the left of the bar as its own chip rather than a seventh
 button, and opens the control panel. It stays put when the bar itself is
