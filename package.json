@@ -1,0 +1,15 @@
+{
+  "name": "hn-tweak",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Readable, dark, mobile-friendly Hacker News (userscript)",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "watch": "tsc --watch --preserveWatchOutput"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}
