@@ -43,6 +43,31 @@ npm run typecheck
 `tsc` and concatenates the two emitted files inside an IIFE, then prepends the
 userscript metadata block. No bundler.
 
+## Navigation
+
+On comment pages a fixed bar sits at the bottom, tracking whichever comment is
+at the top of the reading area:
+
+| Button | Goes to |
+| --- | --- |
+| `top` | the thread's root comment |
+| `parent` | one level up |
+| `child` | first reply |
+| `prev` | previous sibling |
+| `next` | next sibling, falling back to the ancestor's next sibling so it always advances |
+| `fold` | collapse the subtree, then jump past it |
+
+Buttons disable themselves when there is nowhere to go. Navigation is computed
+from the `indent` attribute — the same source of truth `hn.js` uses — so it
+needs no extra DOM and survives HN's own collapsing.
+
+`fold` clicks HN's real `[–]` toggle rather than reimplementing `collstate()`,
+so `coll` / `noshow` / the `[N more]` label and the server-side collapse POST
+all stay consistent.
+
+Scrolling back to a thread resumes where you left off (7-day TTL, skipped when
+the URL has a `#permalink`).
+
 ## Settings
 
 v1 is stylesheet-only. Settings live in `GM_getValue("hn-tweak:settings")`
@@ -52,6 +77,8 @@ v1 is stylesheet-only. Settings live in `GM_getValue("hn-tweak:settings")`
 hnTweak.apply({ theme: "dark" });   // "auto" | "light" | "dark"
 hnTweak.apply({ fontSize: 17 });
 hnTweak.apply({ indentStep: 8, indentCap: 6 });  // badge appears past depth 6
+hnTweak.apply({ navBar: false });
+hnTweak.apply({ rememberPosition: false });
 ```
 
 `indentCap` is what the depth badge keys off: at or below the cap the rails
@@ -72,9 +99,9 @@ injected once and never rebuilt.
 
 ## Roadmap
 
-- [ ] Thumb-reachable comment nav (parent / prev / next / root / first child)
-- [ ] Remember reading position per thread
-- [ ] Collapse-and-advance
+- [x] Thumb-reachable comment nav (top / parent / child / prev / next / fold)
+- [x] Remember reading position per thread
+- [x] Collapse-and-advance
 - [ ] Minimal settings sheet
 
 [Violentmonkey]: https://addons.mozilla.org/android/addon/violentmonkey/

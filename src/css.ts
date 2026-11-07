@@ -78,12 +78,16 @@ function hnBuildCss(o: CssOptions): string {
   --hn-bg:#f6f6ef;--hn-fg:#1a1a1a;--hn-muted:#5f5f5f;
   --hn-link:#1a1a1a;--hn-visited:#5f5f5f;
   --hn-badge-bg:#deded3;--hn-badge-fg:#3f3f3f;
+  --hn-nav-bg:#eceae1;--hn-nav-fg:#333333;--hn-nav-line:#d5d3c9;--hn-nav-active:#dcdad0;
+  --hn-flash:#efe9c4;
 }
 :root.hn-dark{
   ${railVarsDark}
   --hn-bg:#14161a;--hn-fg:#d7dbe2;--hn-muted:#98a0aa;
   --hn-link:#e6e9ee;--hn-visited:#98a0aa;
   --hn-badge-bg:#242a33;--hn-badge-fg:#aab2bc;
+  --hn-nav-bg:#1b2027;--hn-nav-fg:#c3cad4;--hn-nav-line:#2b313a;--hn-nav-active:#252b33;
+  --hn-flash:#2b3542;
 }
 
 /* ---- layout: kill the fixed widths that cause dead space and overflow ---- */
@@ -145,6 +149,37 @@ input[type="submit"],input[type="button"]{font-size:var(--hn-fs-meta)!important}
 textarea[name="text"]{height:6.5em!important;min-height:0!important}
 /* HN truncates in-comment links to 200px with an ellipsis; let them wrap. */
 table.comment-tree .comment a{max-width:none!important;white-space:normal!important;word-break:break-word!important;overflow:visible!important;text-overflow:clip!important;display:inline!important}
+
+/* ---- comment navigation bar ---- */
+html.hn-nav-on body{padding-bottom:calc(58px + env(safe-area-inset-bottom))!important}
+html:not(.hn-nav-on) #hn-nav{display:none!important}
+#hn-nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:9000;
+  display:flex;gap:2px;
+  padding:4px 4px calc(4px + env(safe-area-inset-bottom));
+  background:var(--hn-nav-bg);
+  border-top:1px solid var(--hn-nav-line);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+#hn-nav button{
+  flex:1 1 0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;min-height:46px;padding:5px 2px;border:0;border-radius:7px;
+  background:transparent;color:var(--hn-nav-fg);
+  font:inherit;font-size:10px;line-height:1;letter-spacing:.02em;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+#hn-nav button:active{background:var(--hn-nav-active)}
+#hn-nav button[disabled]{opacity:.3}
+#hn-nav svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* Briefly highlight where navigation landed. This has to sit on .commtext:
+   the !important transparent td background outranks an animation on the
+   cell itself. */
+@keyframes hn-flash{from{background-color:var(--hn-flash)}to{background-color:transparent}}
+tr.hn-flash .commtext{animation:hn-flash 1.3s ease-out;border-radius:3px}
+
+/* enlarge the [–] collapse target without shifting layout */
+.comhead .togg{padding:6px 12px 6px 2px;margin:-6px -12px -6px -2px}
 
 /* ---- dark ---- */
 html.hn-dark{color-scheme:dark}
