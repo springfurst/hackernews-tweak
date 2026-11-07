@@ -57,9 +57,17 @@ at the top of the reading area:
 | `next` | next sibling, falling back to the ancestor's next sibling so it always advances |
 | `fold` | collapse the subtree, then jump past it |
 
-Buttons disable themselves when there is nowhere to go. Navigation is computed
-from the `indent` attribute — the same source of truth `hn.js` uses — so it
-needs no extra DOM and survives HN's own collapsing.
+Buttons disable themselves when there is nowhere to go, and the comment the bar
+is navigating from is marked with an accent bar on its left edge.
+
+Navigation is computed from the `indent` attribute — the same source of truth
+`hn.js` uses — so it needs no extra DOM and survives HN's own collapsing.
+
+Scrolling is animated in script rather than via `behavior: "smooth"`, because
+native smooth scrolling is distance-dependent and is dropped for long jumps
+(anything over ~3 viewports used to teleport). Duration scales mildly with
+distance and is capped at 520ms; `prefers-reduced-motion` and any touch/wheel/
+key press cancel straight to the destination.
 
 `fold` clicks HN's real `[–]` toggle rather than reimplementing `collstate()`,
 so `coll` / `noshow` / the `[N more]` label and the server-side collapse POST

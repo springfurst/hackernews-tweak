@@ -76,7 +76,7 @@ function hnBuildCss(o) {
   --hn-link:#1a1a1a;--hn-visited:#5f5f5f;
   --hn-badge-bg:#deded3;--hn-badge-fg:#3f3f3f;
   --hn-nav-bg:#eceae1;--hn-nav-fg:#333333;--hn-nav-line:#d5d3c9;--hn-nav-active:#dcdad0;
-  --hn-flash:#efe9c4;
+  --hn-flash:#efe9c4;--hn-accent:#2a5d8f;
 }
 :root.hn-dark{
   ${railVarsDark}
@@ -84,7 +84,7 @@ function hnBuildCss(o) {
   --hn-link:#e6e9ee;--hn-visited:#98a0aa;
   --hn-badge-bg:#242a33;--hn-badge-fg:#aab2bc;
   --hn-nav-bg:#1b2027;--hn-nav-fg:#c3cad4;--hn-nav-line:#2b313a;--hn-nav-active:#252b33;
-  --hn-flash:#2b3542;
+  --hn-flash:#2b3542;--hn-accent:#7fb2e5;
 }
 
 /* ---- layout: kill the fixed widths that cause dead space and overflow ---- */
@@ -174,6 +174,9 @@ html:not(.hn-nav-on) #hn-nav{display:none!important}
    cell itself. */
 @keyframes hn-flash{from{background-color:var(--hn-flash)}to{background-color:transparent}}
 tr.hn-flash .commtext{animation:hn-flash 1.3s ease-out;border-radius:3px}
+
+/* Persistent marker for the comment the nav bar is navigating from. */
+tr.hn-ref .commtext{box-shadow:inset 3px 0 0 var(--hn-accent);padding-left:9px;margin-left:-9px;border-radius:2px}
 
 /* enlarge the [–] collapse target without shifting layout */
 .comhead .togg{padding:6px 12px 6px 2px;margin:-6px -12px -6px -2px}
@@ -341,17 +344,27 @@ function hnAfterSubtreeIndex(rows, i) {
             return j;
     return -1;
 }
-/** The comment currently at the top of the reading area. */
+/**
+ * The comment currently at the top of the reading area. Rows are in document
+ * order, so their viewport tops are monotonic — binary search keeps this cheap
+ * enough to run every animation frame.
+ */
 function hnCurrentIndex(rows) {
     const anchor = window.innerHeight * 0.35;
-    let idx = 0;
-    for (let i = 0; i < rows.length; i++) {
-        if (rows[i].getBoundingClientRect().top <= anchor)
-            idx = i;
-        else
-            break;
+    let lo = 0;
+    let hi = rows.length - 1;
+    let best = 0;
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (rows[mid].getBoundingClientRect().top <= anchor) {
+            best = mid;
+            lo = mid + 1;
+        }
+        else {
+            hi = mid - 1;
+        }
     }
-    return idx;
+    return best;
 }
 /**
  * Stamp each comment's depth onto its `.comhead` so the stylesheet can render
@@ -379,12 +392,61 @@ const HN_ICONS = {
     fold: '<path d="M3 2h10M4 6l4 4 4-4"/>',
 };
 let hnFlashTimer = 0;
+let hnScrollFrame = 0;
+/**
+ * Animate the scroll ourselves instead of using `behavior: "smooth"`.
+ * Native smooth scrolling is distance-dependent and gets dropped for long
+ * jumps, which made navigation feel like it sometimes teleported.
+ */
+function hnScrollTo(targetY) {
+    cancelAnimationFrame(hnScrollFrame);
+    const startY = window.scrollY;
+    const delta = targetY - startY;
+    if (Math.abs(delta) < 2) {
+        window.scrollTo(0, targetY);
+        return;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        window.scrollTo(0, targetY);
+        return;
+    }
+    // Longer jumps get a little more time, but never a long, floaty glide.
+    const duration = Math.min(520, Math.max(220, Math.abs(delta) * 0.5));
+    const started = performance.now();
+    const step = (now) => {
+        const p = Math.min(1, (now - started) / duration);
+        const eased = 1 - Math.pow(1 - p, 3);
+        window.scrollTo(0, startY + delta * eased);
+        hnScrollFrame = p < 1 ? requestAnimationFrame(step) : 0;
+        if (p >= 1)
+            window.scrollTo(0, targetY);
+    };
+    hnScrollFrame = requestAnimationFrame(step);
+}
+/** Cancel an in-flight glide as soon as the reader takes over. */
+function hnCancelScroll() {
+    if (hnScrollFrame) {
+        cancelAnimationFrame(hnScrollFrame);
+        hnScrollFrame = 0;
+    }
+}
+/** Expand any collapsed ancestor so the target is actually rendered. */
+function hnEnsureVisible(rows, i) {
+    let guard = 0;
+    while (rows[i] && rows[i].offsetParent === null && guard++ < 32) {
+        const p = hnParentIndex(rows, i);
+        if (p < 0)
+            break;
+        if (rows[p].classList.contains("coll")) {
+            rows[p].querySelector(".togg")?.click();
+        }
+        i = p;
+    }
+}
 function hnGoto(row) {
     if (!row)
         return;
-    const top = row.getBoundingClientRect().top + window.scrollY - HN_NAV_OFFSET;
-    const far = Math.abs(top - window.scrollY) > window.innerHeight * 3;
-    window.scrollTo({ top, behavior: far ? "auto" : "smooth" });
+    hnScrollTo(row.getBoundingClientRect().top + window.scrollY - HN_NAV_OFFSET);
     row.classList.remove("hn-flash");
     void row.offsetWidth; // restart the animation
     row.classList.add("hn-flash");
@@ -415,6 +477,12 @@ function hnBuildNav() {
     bar.id = "hn-nav";
     bar.setAttribute("aria-label", "Comment navigation");
     const buttons = new Map();
+    const go = (rows, idx) => {
+        if (idx < 0 || idx >= rows.length)
+            return;
+        hnEnsureVisible(rows, idx);
+        hnGoto(rows[idx]);
+    };
     const add = (kind, label, action) => {
         const b = document.createElement("button");
         b.type = "button";
@@ -429,21 +497,27 @@ function hnBuildNav() {
         buttons.set(kind, b);
         bar.appendChild(b);
     };
-    add("top", "top", (rows, i) => hnGoto(rows[hnRootIndex(rows, i)]));
-    add("parent", "parent", (rows, i) => hnGoto(rows[hnParentIndex(rows, i)]));
-    add("child", "child", (rows, i) => hnGoto(rows[hnFirstChildIndex(rows, i)]));
-    add("prev", "prev", (rows, i) => hnGoto(rows[hnPrevSiblingIndex(rows, i)]));
+    add("top", "top", (rows, i) => go(rows, hnRootIndex(rows, i)));
+    add("parent", "parent", (rows, i) => go(rows, hnParentIndex(rows, i)));
+    add("child", "child", (rows, i) => go(rows, hnFirstChildIndex(rows, i)));
+    add("prev", "prev", (rows, i) => go(rows, hnPrevSiblingIndex(rows, i)));
     add("next", "next", (rows, i) => {
         // Fall back to the ancestor's next sibling so "next" always advances.
         const sib = hnNextSiblingIndex(rows, i);
-        hnGoto(rows[sib >= 0 ? sib : i + 1]);
+        go(rows, sib >= 0 ? sib : i + 1);
     });
     add("fold", "fold", (rows, i) => hnFoldAndAdvance(rows, i));
+    let refRow = null;
     const refresh = () => {
         const rows = hnRows();
         if (rows.length === 0)
             return;
         const i = hnCurrentIndex(rows);
+        if (rows[i] !== refRow) {
+            refRow?.classList.remove("hn-ref");
+            rows[i].classList.add("hn-ref");
+            refRow = rows[i];
+        }
         const state = {
             top: hnRootIndex(rows, i) !== i,
             parent: hnParentIndex(rows, i) >= 0,
@@ -457,6 +531,9 @@ function hnBuildNav() {
     };
     document.body.appendChild(bar);
     document.documentElement.classList.add("hn-nav-on");
+    for (const ev of ["touchstart", "wheel", "keydown"]) {
+        window.addEventListener(ev, hnCancelScroll, { passive: true });
+    }
     refresh();
     return { refresh };
 }

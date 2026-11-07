@@ -79,7 +79,7 @@ function hnBuildCss(o: CssOptions): string {
   --hn-link:#1a1a1a;--hn-visited:#5f5f5f;
   --hn-badge-bg:#deded3;--hn-badge-fg:#3f3f3f;
   --hn-nav-bg:#eceae1;--hn-nav-fg:#333333;--hn-nav-line:#d5d3c9;--hn-nav-active:#dcdad0;
-  --hn-flash:#efe9c4;
+  --hn-flash:#efe9c4;--hn-accent:#2a5d8f;
 }
 :root.hn-dark{
   ${railVarsDark}
@@ -87,7 +87,7 @@ function hnBuildCss(o: CssOptions): string {
   --hn-link:#e6e9ee;--hn-visited:#98a0aa;
   --hn-badge-bg:#242a33;--hn-badge-fg:#aab2bc;
   --hn-nav-bg:#1b2027;--hn-nav-fg:#c3cad4;--hn-nav-line:#2b313a;--hn-nav-active:#252b33;
-  --hn-flash:#2b3542;
+  --hn-flash:#2b3542;--hn-accent:#7fb2e5;
 }
 
 /* ---- layout: kill the fixed widths that cause dead space and overflow ---- */
@@ -177,6 +177,9 @@ html:not(.hn-nav-on) #hn-nav{display:none!important}
    cell itself. */
 @keyframes hn-flash{from{background-color:var(--hn-flash)}to{background-color:transparent}}
 tr.hn-flash .commtext{animation:hn-flash 1.3s ease-out;border-radius:3px}
+
+/* Persistent marker for the comment the nav bar is navigating from. */
+tr.hn-ref .commtext{box-shadow:inset 3px 0 0 var(--hn-accent);padding-left:9px;margin-left:-9px;border-radius:2px}
 
 /* enlarge the [–] collapse target without shifting layout */
 .comhead .togg{padding:6px 12px 6px 2px;margin:-6px -12px -6px -2px}
