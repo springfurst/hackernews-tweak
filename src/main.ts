@@ -74,11 +74,33 @@ function hnSaveSettings(s: HnSettings): void {
 
 const hnDarkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
+let hnCurrent: HnSettings = { ...HN_DEFAULTS };
+
+/**
+ * Stamp each comment's depth onto its `.comhead` so the stylesheet can render
+ * a badge where indentation has been clamped. We only add attributes and a
+ * class — the row structure and the `indent` attribute hn.js reads stay
+ * untouched.
+ */
+function hnUpdateDepths(): void {
+  const rows = document.querySelectorAll("tr.athing.comtr");
+  for (const row of rows) {
+    const ind = row.querySelector("td.ind");
+    const comhead = row.querySelector(".comhead");
+    if (!ind || !comhead) continue;
+    const depth = Number(ind.getAttribute("indent"));
+    if (!Number.isFinite(depth)) continue;
+    comhead.setAttribute("data-depth", String(depth));
+    comhead.classList.toggle("hn-deep", depth > hnCurrent.indentCap);
+  }
+}
+
 function hnPrefersDark(theme: HnSettings["theme"]): boolean {
   return theme === "dark" || (theme === "auto" && hnDarkQuery.matches);
 }
 
 function hnApplySettings(s: HnSettings): void {
+  hnCurrent = s;
   const root = document.documentElement;
   const style = root.style;
 
@@ -95,6 +117,8 @@ function hnApplySettings(s: HnSettings): void {
   }
 
   root.classList.toggle("hn-dark", hnPrefersDark(s.theme));
+
+  hnUpdateDepths();
 }
 
 function hnInjectStyle(css: string): void {
@@ -124,6 +148,13 @@ function hnMain(): void {
 
   let settings = hnReadSettings();
   hnApplySettings(settings);
+
+  // At @run-at document-start there are no comments to stamp yet.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", hnUpdateDepths, { once: true });
+  } else {
+    hnUpdateDepths();
+  }
 
   hnDarkQuery.addEventListener("change", () => hnApplySettings(settings));
 

@@ -25,8 +25,16 @@ interface CssOptions {
   maxIndent: number;
 }
 
+/** How many depth-coloured rails we draw. Extra depth is simply clamped. */
+const HN_RAIL_LAYERS = 12;
+
 function hnIndentPx(depth: number, o: CssOptions): number {
   return Math.min(depth, o.indentCap) * o.indentStep;
+}
+
+/** Hue ramp for the nesting rails; consecutive depths are far apart in hue. */
+function hnRailHue(depth: number): number {
+  return (depth * 47 + 200) % 360;
 }
 
 function hnBuildCss(o: CssOptions): string {
@@ -43,6 +51,21 @@ function hnBuildCss(o: CssOptions): string {
     indentRules += `td.ind[indent="${n}"]{width:var(--hn-w-${n})!important}`;
   }
 
+  // One 1px vertical line per depth, each its own hue. Layers past the row's
+  // own indent fall outside the cell and are clipped, so a comment at depth N
+  // shows N rails — one per ancestor.
+  let railVarsLight = "";
+  let railVarsDark = "";
+  const railLayers: string[] = [];
+  const railPositions: string[] = [];
+  for (let n = 0; n < HN_RAIL_LAYERS; n++) {
+    const hue = hnRailHue(n);
+    railVarsLight += `--hn-rail-${n}:hsl(${hue} 55% 45%);`;
+    railVarsDark += `--hn-rail-${n}:hsl(${hue} 62% 62%);`;
+    railLayers.push(`linear-gradient(var(--hn-rail-${n}),var(--hn-rail-${n}))`);
+    railPositions.push(n === 0 ? "0 0" : `calc(var(--hn-step)*${n}) 0`);
+  }
+
   return `
 :root{
   --hn-fs:${o.fontSize}px;
@@ -51,12 +74,16 @@ function hnBuildCss(o: CssOptions): string {
   --hn-fs-small:${Math.max(11, o.fontSize - 4)}px;
   --hn-lh:${o.lineHeight};
   ${indentVars}
+  ${railVarsLight}
   --hn-bg:#f6f6ef;--hn-fg:#1a1a1a;--hn-muted:#5f5f5f;
-  --hn-link:#1a1a1a;--hn-visited:#5f5f5f;--hn-rail:#cfcfc6;
+  --hn-link:#1a1a1a;--hn-visited:#5f5f5f;
+  --hn-badge-bg:#deded3;--hn-badge-fg:#3f3f3f;
 }
 :root.hn-dark{
+  ${railVarsDark}
   --hn-bg:#14161a;--hn-fg:#d7dbe2;--hn-muted:#98a0aa;
-  --hn-link:#e6e9ee;--hn-visited:#98a0aa;--hn-rail:#2b313a;
+  --hn-link:#e6e9ee;--hn-visited:#98a0aa;
+  --hn-badge-bg:#242a33;--hn-badge-fg:#aab2bc;
 }
 
 /* ---- layout: kill the fixed widths that cause dead space and overflow ---- */
@@ -67,11 +94,33 @@ table.comment-tree{width:100%!important;table-layout:fixed!important}
 table.comment-tree td>table{width:100%!important;table-layout:fixed!important}
 td.votelinks{width:22px!important;min-width:22px!important}
 
-/* ---- nesting: constant step, clamped depth, guide rails ---- */
+/* ---- nesting: constant step, clamped depth, depth-coloured guide rails ---- */
 td.ind img[src="s.gif"]{display:none!important}
-td.ind{padding:0!important;background:repeating-linear-gradient(to right,var(--hn-rail) 0 1px,transparent 1px var(--hn-step))}
+td.ind{
+  padding:0!important;
+  background-image:${railLayers.join(",")};
+  background-size:1px 100%;
+  background-position:${railPositions.join(",")};
+  background-repeat:no-repeat;
+}
 td.ind[indent="0"]{background:none!important}
 ${indentRules}
+
+/* Depth badge, shown only where indentation stops being informative.
+   hn.js/stamping puts data-depth on .comhead and toggles .hn-deep. */
+.comhead.hn-deep::before{
+  content:"\\21B3\\00a0" attr(data-depth);
+  display:inline-block;
+  margin-right:.45em;
+  padding:0 .3em;
+  border-radius:3px;
+  background:var(--hn-badge-bg);
+  color:var(--hn-badge-fg);
+  font-size:.95em;
+  font-variant-numeric:tabular-nums;
+  line-height:1.6;
+  vertical-align:baseline;
+}
 
 /* ---- type ---- */
 .commtext{font-size:var(--hn-fs)!important;line-height:var(--hn-lh)!important;color:var(--hn-fg)!important}
@@ -92,8 +141,8 @@ ${indentRules}
 .yclinks,.yclinks a{font-size:var(--hn-fs-small)!important;color:var(--hn-muted)!important}
 .yclinks a:link,.yclinks a:visited{color:var(--hn-muted)!important}
 input[type="submit"],input[type="button"]{font-size:var(--hn-fs-meta)!important}
-.pagetop,.pagetop a{font-size:var(--hn-fs-meta)!important}
-.pagetop b,.pagetop b a{font-size:var(--hn-fs)!important}
+/* HN ships rows="8"; on a phone that is ~250px of empty box above the thread. */
+textarea[name="text"]{height:6.5em!important;min-height:0!important}
 /* HN truncates in-comment links to 200px with an ellipsis; let them wrap. */
 table.comment-tree .comment a{max-width:none!important;white-space:normal!important;word-break:break-word!important;overflow:visible!important;text-overflow:clip!important;display:inline!important}
 
@@ -108,7 +157,7 @@ html.hn-dark a:link{color:var(--hn-link)!important}
 html.hn-dark a:visited{color:var(--hn-visited)!important}
 html.hn-dark .comment a:link,html.hn-dark .comment a:visited{color:#7fb2e5!important}
 /* Downvote greys: keep HN's "this is greyed out" signal, but keep a floor
-   near 4:1 so heavily downvoted comments stay legible. */
+   near 4.5:1 so heavily downvoted comments stay legible. */
 html.hn-dark .c5a,html.hn-dark .c5a a:link{color:#c3c9d2!important}
 html.hn-dark .c73,html.hn-dark .c73 a:link{color:#b8bec7!important}
 html.hn-dark .c82,html.hn-dark .c82 a:link{color:#adb4bd!important}

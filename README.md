@@ -18,6 +18,8 @@ These were measured against HN's current `news.css`, not guessed:
 | Text too small | `.comment` is 9pt (12px), `.comhead` 8pt (10.67px), `.reply` **10px**, `.toptext`/`.default` 13.3px | 16px body, 13px metadata, scaled from one `--hn-fs` variable |
 | No dark mode | HN ships none, and colours are presentational attributes (`bgcolor="#f6f6ef"`), so overrides need `!important` | `prefers-color-scheme`-aware theme |
 | Low-contrast text | `.toptext`/`.default` are `#828282` — **3.4:1** on the light background, failing WCAG AA | Re-mapped greys, all body text ≥ 4.5:1 |
+| Deep replies indistinguishable | Indent is clamped at 8 levels, so depth 9+ all look identical | A hue-coded 1px rail per ancestor level, plus a `↳ 9` badge once depth exceeds `indentCap` |
+| Empty comment box eats the top of every thread | `textarea rows="8"` is ~250px on a phone | `6.5em` (104px) |
 
 Contrast was verified programmatically in both themes: every audited selector
 now passes WCAG AA (4.5:1 for normal text). The downvote-grey ramp keeps HN's
@@ -49,8 +51,11 @@ v1 is stylesheet-only. Settings live in `GM_getValue("hn-tweak:settings")`
 ```js
 hnTweak.apply({ theme: "dark" });   // "auto" | "light" | "dark"
 hnTweak.apply({ fontSize: 17 });
-hnTweak.apply({ indentStep: 8, indentCap: 6 });
+hnTweak.apply({ indentStep: 8, indentCap: 6 });  // badge appears past depth 6
 ```
+
+`indentCap` is what the depth badge keys off: at or below the cap the rails
+already convey the level, so no number is shown.
 
 Every knob is a CSS custom property on `<html>`, so the sheet itself is
 injected once and never rebuilt.
